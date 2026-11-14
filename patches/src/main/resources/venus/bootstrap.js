@@ -92,7 +92,7 @@
     const settings = { debugLog: true, crashScreen: true, picker: false, voice: false, copyBios: false, favouriteAnything: false, freeNitro: false, emojis: true, stickers: true, hyperlinks: true,
         reverseImageSearch: false, copyFileContents: false, replyTimestamp: false, imageDescriptions: false, channelPreview: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
         jumpToTop: false, hiddenChannels: false, hiddenChannelsMenu: true, pastelize:false, pastelAll:false, pastelContent:false, platformIndicators:false, piDmHeader:true, piUserList:true, piProfile:true, piHideMobile:true, reviewDB:false, reviewWarning:true, readAll:false, readAllMode:"guilds",
-        quests:false, questsVideo:true, questsPlay:true, questsActivity:true, questsEnroll:true, questsDashboardAlerts:false,
+        quests:false, questsVideo:true, questsPlay:true, questsActivity:true, questsEnroll:true, questsDashboardAlerts:false, questsConcurrent:1,
         badges:false, badgesGameTime:true, badgesUniqueGames:true, badgesCycleMinutes:15, badgesGamesAtOnce:2, systemFont:false, systemFontSource:"phone",
         systemEmoji:false, systemEmojiSource:"phone", gestures:false, gestureOwn:"edit", gestureTripleDelete:true,
         validUser:false, youBarSettings:false, splitMessages:false,
@@ -110,7 +110,7 @@
             debugLog: true, crashScreen: true, picker: false, voice: false, copyBios: false, favouriteAnything: false, freeNitro: false, emojis: true, stickers: true, hyperlinks: true,
             reverseImageSearch: false, copyFileContents: false, replyTimestamp: false, imageDescriptions: false, channelPreview: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
             jumpToTop: false, hiddenChannels: false, hiddenChannelsMenu: true, pastelize: false, pastelAll: false, pastelContent: false, platformIndicators: false, piDmHeader: true, piUserList: true, piProfile: true, piHideMobile: true, reviewDB: false, reviewWarning: true, readAll: false, readAllMode: "guilds",
-            quests: false, questsVideo: true, questsPlay: true, questsActivity: true, questsEnroll: true, questsDashboardAlerts: false,
+            quests: false, questsVideo: true, questsPlay: true, questsActivity: true, questsEnroll: true, questsDashboardAlerts: false, questsConcurrent: 1,
             badges: false, badgesGameTime: true, badgesUniqueGames: true, badgesCycleMinutes: 15, badgesGamesAtOnce: 2, systemFont: false, systemFontSource: "phone",
             systemEmoji: false, systemEmojiSource: "phone", gestures: false, gestureOwn: "edit", gestureTripleDelete: true,
             validUser: false, youBarSettings: false, splitMessages: false,
@@ -5241,6 +5241,18 @@
     const quest = {store:null, dispatcher:null, generation:0, running:null, enrolling:false, skip:new Map(), enrollBlockedUntil:0,
         scanTimer:undefined, refetchTimer:undefined, user:null, completed:0, last:"", error:"", desktop:null, executables:new Map(),
         videoAt:new Map()};
+    quest.active = new Map();
+    function questActiveLimit() {
+        const n = Math.floor(Number(settings.questsConcurrent));
+        return n === 2 || n === 3 ? n : 1;
+    }
+    // Legacy quest.running remains the first active entry for background service
+    // compatibility. Each progress loop verifies membership in quest.active.
+    function questSyncPrimary() {
+        quest.running = quest.active.values().next().value || null;
+        backgroundSync();
+        notify("quests");
+    }
     function questSleep(ms) { return new Promise(resolve => { later(resolve, ms); }); }
     function questStore() {
         if (quest.store) return quest.store;
@@ -5490,7 +5502,19 @@
         // An accept says it came from the Quests screen (QUEST_HOME_MOBILE), which you can only tap with Discord open.
         // Sent from the background it carried client_app_state "background", which no real tap can. Wait for Discord.
         if (waiting.length && !quest.enrolling && !blocked && onScreen) questEnroll(waiting[0]);
-        if (!quest.running && ready.length) questRun(ready[0]);
+        // Only one Video task at a time. Keep separate heartbeat loops bounded
+        // and never select a Quest that already owns a running slot.
+        let slots = Math.max(0, questActiveLimit() - quest.active.size);
+        let videoInFlight = Array.from(quest.active.values()).some(entry => entry.task.kind === "video");
+        for (const item of ready) {
+            if (!slots) break;
+            if (quest.active.has(item.id)) continue;
+            const task = questTask(item);
+            if (!task || task.kind === "video" && videoInFlight) continue;
+            questRun(item);
+            slots--;
+            if (task.kind === "video") videoInFlight = true;
+        }
     }
     // Accepting one at a time, a few seconds apart. Includes Discord's own QuestDataUtils (7652) ad decision and
     // sealed metadata fields (matching _enrollInQuest in 9474) so the enrollment body is identical to a manual tap.
@@ -5533,26 +5557,29 @@
             questsSchedule(3000 + Math.floor(Math.random() * 2000));
         });
     }
-    function questActive(entry) { return quest.running === entry && entry.generation === quest.generation && enabled("quests"); }
+    function questActive(entry) { return quest.active.get(entry.id) === entry && entry.generation === quest.generation && enabled("quests"); }
     function questRun(item) {
         const task = questTask(item), entry = {id:item.id, task, generation:quest.generation, name:questName(item)};
-        quest.running = entry;
-        backgroundSync();
-        notify("quests");
+        if (!task || quest.active.has(item.id) || quest.active.size >= questActiveLimit()) return;
+        quest.active.set(entry.id, entry);
+        questSyncPrimary();
         const work = task.kind === "video" ? questVideo(entry, item) : task.kind === "play" ? questPlay(entry) : questActivity(entry);
         work.then(done => {
-            if (!done || entry.generation !== quest.generation) return;
+            if (!done || !questActive(entry)) return;
             quest.completed++;
             // The store's own update follows; don't pick the same quest again in the meantime.
             quest.skip.set(entry.id, Date.now() + 10 * 60 * 1000);
             questStatus("Completed {name}.", false, {name:entry.name});
         }, error => {
-            if (entry.generation !== quest.generation) return;
+            if (!questActive(entry)) return;
             const wait = questRetryAfter(error);
             quest.skip.set(entry.id, Date.now() + Math.max(wait, QUEST_RETRY_MS));
             questStatus("Couldn't finish {name}: {problem}", true, {name:entry.name, problem:String(error && error.message || error)});
         }).then(() => {
-            if (quest.running === entry) { quest.running = null; backgroundSync(); notify("quests"); }
+            if (quest.active.get(entry.id) === entry) {
+                quest.active.delete(entry.id);
+                questSyncPrimary();
+            }
             if (entry.generation === quest.generation) questsSchedule(2000 + Math.floor(Math.random() * 2000));
         });
     }
@@ -5560,7 +5587,7 @@
     // How far the running Quest is, for the progress bar on the Quests page. Only that page listens.
     function questProgressed(entry, value) {
         const n = Number(value);
-        if (!Number.isFinite(n) || quest.running !== entry) return;
+        if (!Number.isFinite(n) || !questActive(entry)) return;
         entry.progress = Math.max(0, Math.min(entry.task.target, n));
         notify("quests");
     }
@@ -5758,8 +5785,9 @@
     }
     // Stops everything in flight: switching it off, logging out, or another account signing in.
     function questsStop(graceful) {
-        if (graceful) questTerminate(quest.running);
+        if (graceful) quest.active.forEach(entry => questTerminate(entry));
         quest.generation++;
+        quest.active.clear();
         quest.running = null; quest.enrolling = false; quest.enrollBlockedUntil = 0; quest.skip.clear();
         if (global.clearTimeout) {
             if (quest.scanTimer !== undefined) global.clearTimeout(quest.scanTimer);
@@ -5789,21 +5817,21 @@
     // Discord can connect before the saved settings finish loading. Quest Completer was still off at that
     // moment, so it never started until the next reconnect. Start it now if Discord is already connected.
     function questsLoaded() {
-        if (quest.user && quest.refetchTimer === undefined && !quest.running) questsStart(8000);
+        if (quest.user && quest.refetchTimer === undefined && !quest.active.size) questsStart(8000);
     }
     function questsSettingChanged(key, value) {
         if (key === "quests" && !value) { questsStop(true); return; }
         if (!enabled("quests")) return;
         if (key === "quests") { questsStart(1000); return; }
-        // Turning a quest type off stops that kind if it's the one running.
-        const running = quest.running && quest.running.task;
-        if (!value && running && (key === "questsVideo" && running.kind === "video" || key === "questsActivity" && running.kind === "activity" ||
-            key === "questsPlay" && running.kind === "play")) {
-            questTerminate(quest.running);
-            quest.generation++; quest.running = null; quest.enrolling = false;
-            if (quest.scanTimer !== undefined && global.clearTimeout) global.clearTimeout(quest.scanTimer);
-            quest.scanTimer = undefined;
-            backgroundSync();
+        // Stop only the disabled type; unrelated Quest loops remain intact.
+        if (!value && (key === "questsVideo" || key === "questsActivity" || key === "questsPlay")) {
+            for (const entry of Array.from(quest.active.values())) {
+                if (key === "quests" + entry.task.kind.charAt(0).toUpperCase() + entry.task.kind.slice(1)) {
+                    questTerminate(entry);
+                    quest.active.delete(entry.id);
+                }
+            }
+            questSyncPrimary();
         }
         questsSchedule(1000);
     }
@@ -5811,9 +5839,13 @@
         if (!enabled("quests")) return "Turned off. Switch it on in Features to start.";
         // The card's title already says what's happening, so the first line adds to it instead of repeating it.
         const lines = [];
-        if (quest.running) {
-            const share = questShare(), left = share != null ? Math.ceil((quest.running.task.target - quest.running.progress) / 60) : 0;
-            lines.push(tr("Now: {name}.", {name:quest.running.name}) + (share != null && left > 0 ? " " + pl(left, "About {n} minute left.", "About {n} minutes left.") : ""));
+        if (quest.active.size) {
+            lines.push(tr("{n} Quests running", {n:quest.active.size}));
+            quest.active.forEach(entry => {
+                const progress = typeof entry.progress === "number" && entry.task.target ?
+                    Math.min(100,Math.max(0,Math.round(entry.progress*100/entry.task.target))) : 0;
+                lines.push(tr("{name}: {n}%", {name:entry.name,n:progress}));
+            });
         } else if (!questTypesOn()) lines.push(tr("Turn on at least one Quest type below."));
         else if (!quest.completed) lines.push(tr(settings.questsEnroll ? "Starts the next Quest by itself as soon as one is available." : "Starts as soon as you accept a Quest."));
         if (quest.completed) lines.push(pl(quest.completed, "Completed {n} Quest since Discord opened.", "Completed {n} Quests since Discord opened."));
@@ -5829,7 +5861,7 @@
     function questTypesOn() { return !!(settings.questsVideo || settings.questsPlay || settings.questsActivity); }
     function questStatusTitle() {
         if (quest.error) return tr("Something went wrong");
-        if (quest.running) return tr("Completing a Quest");
+        if (quest.active.size) return tr("{n} Quests running", {n:quest.active.size});
         if (!questTypesOn()) return tr("Nothing to complete");
         return quest.completed ? pl(quest.completed, "{n} Quest done", "{n} Quests done") : tr("Watching for Quests");
     }
@@ -5867,15 +5899,20 @@
             const reward = Array.from(new Set(rewardParts)).join(" · ") || "Open the Quest for reward details";
             const expiring = Number.isFinite(expires) && expires <= now;
             const progress = task ? Math.max(0, Math.min(1, questProgress(item, task.type) / task.target)) : 0;
-            const condition = completed ? "Completed" : expiring ? "Expired" : enrolled ? "Accepted" : "Available";
+            const isRunning=quest.active.has(item.id);
+            const condition = completed ? "Completed" : expiring ? "Expired" : isRunning ? "Running" :
+                enrolled && task ? "Queued" : enrolled ? "Accepted" : "Available";
             const reason = completed ? "The Quest is completed." : expiring ? "The Quest has expired." :
                 questFlag(store,"isQuestAccessSuspended") === true ? "Quest access is paused for this account." :
                 !task ? "No enabled supported task. Check Quest type settings or open the Quest manually." :
                 !enrolled && !settings.questsEnroll ? "Accept this Quest in Discord to begin." :
-                quest.running && quest.running.id === item.id ? "Currently running." :
+                quest.active.has(item.id) ? "Currently running." :
                 quest.enrolling ? "Waiting for acceptance to finish." : "Waiting for a compatible task.";
+            const live = quest.active.get(item.id);
+            const shownProgress = live && typeof live.progress === "number" && live.task.target > 0 ?
+                Math.max(0,Math.min(1,live.progress/live.task.target)) : progress;
             return {id:item.id, name:questName(item), reward, type, expires, completed, claimed, enrolled,
-                condition, progress, reason, completedAt:questTime(status.completedAt), expiring};
+                condition, running:isRunning, progress:shownProgress, reason, completedAt:questTime(status.completedAt), expiring};
         }).sort((a,b) => Number(a.completed) - Number(b.completed) ||
             (Number.isFinite(a.expires) ? a.expires : Infinity) - (Number.isFinite(b.expires) ? b.expires : Infinity));
     }
@@ -5934,6 +5971,8 @@
         },[id]);
         const all=questDashboardItems(store), now=Date.now();
         React.useEffect(()=>{questDashboardNotify(all,id);},[id,tick,settings.questsDashboardAlerts]);
+        const running=all.filter(item=>item.running);
+        const waiting=all.filter(item=>item.condition==="Queued");
         const totals={active:all.filter(item=>!item.completed&&!item.expiring).length,
             done:all.filter(item=>item.completed).length,
             expired:all.filter(item=>item.expiring&&!item.completed).length};
@@ -5960,7 +5999,9 @@
                 tr("Diagnostics: {value}",{value:tr(item.reason)})
             ].filter(Boolean).join("\n") : null;
             const status=item.completed?tr("Completed"):tr(questDashboardDeadline(item.expires,now));
-            const sub=[item.type,status,item.enrolled&&!item.completed?tr("Accepted"):null].filter(Boolean).join(" · ");
+            const sub=[item.running?tr("RUNNING · {n}%",{n:Math.round(item.progress*100)}):
+                item.condition==="Queued"?tr("QUEUED"):tr(item.condition),
+                item.type,status].filter(Boolean).join(" · ");
             const detailsPanel=opened ? el(RN.View,{key:"questDetails:"+item.id,
                 style:{paddingHorizontal:16,paddingVertical:12,borderRadius:12,backgroundColor:"#282a31",gap:8}},
                 el(RN.Text,{selectable:true,style:{color:"#d9dce4",fontSize:13,lineHeight:20}},details),
@@ -5978,6 +6019,21 @@
             statusCard("questDashboardOverview",tr("{active} active · {done} completed · {expired} expired",
                 {active:totals.active,done:totals.done,expired:totals.expired}),{title,
                 IconComponent:venusIcon(13929,"QuestsIcon")}),
+            running.length ? el(RN.View,{key:"runningQuests",style:{gap:8}},
+                groupTitle("runningTitle","Running now"),
+                running.map(item => el(RN.View,{key:"running:"+item.id,
+                    style:{borderWidth:1,borderColor:"#5865f2",borderRadius:14,padding:14,
+                        backgroundColor:"#5865f21a",gap:6}},
+                    el(RN.Text,{style:{color:"#f2f3f5",fontSize:15,fontWeight:"700"}},item.name),
+                    el(RN.Text,{style:{color:"#b9c4ff",fontSize:12}},
+                        tr("{type} · {n}% complete",{type:tr(item.type),n:Math.round(item.progress*100)})),
+                    el(VenusProgress,{key:"runningBar:"+item.id,value:item.progress}),
+                    el(RN.Text,{style:{color:"#a7aab2",fontSize:12}},questDashboardDeadline(item.expires,now)))))
+                : statusCard("noRunning","No Quest is running right now.",
+                    {title:tr("Waiting for Quests"),IconComponent:venusIcon(13929,"QuestsIcon")}),
+            waiting.length?statusCard("waitingCount",
+                tr("{n} accepted Quests waiting for a free slot.",{n:waiting.length}),
+                {title:tr("Queued"),IconComponent:venusIcon(5150,"ClockIcon")}):null,
             selector,types,
             el(Group,{key:"questDashboardList",title:tr("Quests")},
                 rows.length?rows:actionRow(ui,"empty",all.length?tr("No Quests match these filters"):tr("No Quests loaded"),
@@ -6001,6 +6057,12 @@
                 quest.error ? "ChatWarningIcon" : quest.running ? "TimerIcon" : "QuestsIcon"),
                 footer:questShare() != null ? el(VenusProgress, {key:"progress:" + quest.running.id, value:questShare()}) : null}) : offCard("status", venusIcon(13929, "QuestsIcon"), "quests"),
             el(QuestDashboard, {key:"dashboard"}),
+            el(RN.View,{key:"concurrency",style:{gap:8}},
+                groupTitle("concurrentTitle","Quest slots"),
+                venusSegmented({key:"concurrentChoice",value:questActiveLimit(),disabled:!on,
+                    onChange:value=>setSetting("questsConcurrent",value),
+                    items:[{value:1,label:tr("1 Quest")},{value:2,label:tr("2 Quests")},{value:3,label:tr("3 Quests")}]}),
+                footnote("concurrentNote","Up to three independent tasks; only one video task at a time. Other Quests wait for a free slot.")),
             el(Group, {key:"types", title:tr("Quests to complete")},
                 toggle("questsVideo", "Video Quests", "Reported as watched at normal speed, without playing the video.", rowIcon(11187, "VideoIcon")),
                 toggle("questsPlay", "Play Quests", "Play time counts without installing or opening the game.", rowIcon(9514, "GameControllerIcon")),
