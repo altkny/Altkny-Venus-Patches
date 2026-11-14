@@ -75,7 +75,7 @@ private val runtimeAssets = rawResourcePatch {
             "/*__FEATURES__*/",
             "{picker:$pickerSelected,voice:$voiceSelected,copyBios:$copyBiosSelected," +
                 "favouriteAnything:$favouriteAnythingSelected,freeNitro:$freeNitroSelected," +
-                listOf("noTyping", "quickDelete", "noDelete", "jumpToTop", "hiddenChannels", "pastelize", "platformIndicators", "reviewDB", "readAll", "quests", "badges", "systemFont",
+                listOf("reverseImageSearch", "copyFileContents", "noTyping", "quickDelete", "noDelete", "jumpToTop", "hiddenChannels", "pastelize", "platformIndicators", "reviewDB", "readAll", "quests", "badges", "systemFont",
                     "systemEmoji", "gestures", "validUser", "youBarSettings", "splitMessages", "translate", "userNotif", "accountSwitcher", "appIcons", "nitroThemes", "customThemes", "materialYou", "iconPacks", "messageHighlight", "serverInfo", "serverEdit", "fixEmbeds", "tenorGifs", "hideBlocked", "bulkDelete", "experiments", "cleanChannels", "noHandsfree", "voiceOptions", "anonFiles", "staffTag", "removedAlerts", "fullImages", "hideAnything", "alwaysTrust", "noConfirmPin", "clickableMentions", "expandBar", "quietReplies", "silentLeave", "guildLurk", "compressUploads", "timeoutDuration", "dndBanners", "landscapeFull", "voiceDownload", "cloneExpressions", "listenAlong", "silentEdit", "silentDelete", "localEdit", "hypeSquad", "customIdle", "mutualGroupDMs", "fastDeleteChannels", "pauseInvites", "platformSpoof", "backgroundMedia", "viewRaw", "fakeDeafen")
                     .joinToString(",") { "$it:${it in additionalSelections}" } + "}"
         )
@@ -384,6 +384,14 @@ val guildLurk = bundledPlugin("guildLurk", "Preview servers without joining",
 @Suppress("unused")
 val quietReplies = bundledPlugin("quietReplies", "Reply without pinging",
     "Replies start with the ping off, so nobody gets pinged unless you turn it on.")
+
+@Suppress("unused")
+val reverseImageSearch = bundledPlugin("reverseImageSearch", "Reverse image search",
+    "Search image attachments on TinEye from the message menu. The image URL is shared with TinEye.")
+
+@Suppress("unused")
+val copyFileContents = bundledPlugin("copyFileContents", "Copy file contents",
+    "Copy small text attachments from the message menu to the clipboard.")
 
 @Suppress("unused")
 val viewRaw = bundledPlugin("viewRaw", "View raw data",
