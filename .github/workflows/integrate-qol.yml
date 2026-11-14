@@ -13,7 +13,9 @@ jobs:
         with:
           persist-credentials: true
       - name: Integrate hooks
-        run: python3 scripts/integrate_qol.py
+        run: |
+          python3 scripts/integrate_qol.py
+          python3 scripts/integrate_qol_more.py
       - name: Validate JavaScript syntax
         run: |
           sed 's@/\*__FEATURES__\*/@{}@' patches/src/main/resources/venus/bootstrap.js > /tmp/venus-bootstrap-check.js
@@ -24,6 +26,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add patches/src/main/resources/venus/bootstrap.js
           if ! git diff --cached --quiet; then
-            git commit -m "Integrate QoL message actions in Venus bootstrap"
+            git commit -m "Integrate additional QoL hooks into Venus bootstrap"
             git push
           fi
