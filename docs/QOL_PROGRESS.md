@@ -32,3 +32,23 @@ Custom Rich Presence, Message Link Embeds, Edit Attachments, Message Preview, Be
 Custom Rich Presence specifically requires a separately validated mechanism for updating the user's Discord presence. Displaying an activity locally is not the same as publishing a Rich Presence visible to others.
 
 Do not publish these functions as fully supported until the Morphe build and real Android tests pass.
+
+## Quest dashboard (November 14, 2026)
+
+Added inside the existing **Complete Quests automatically** settings page, without changing the existing Quest completion machinery:
+
+- Live read-only Quest list from the local Discord QuestStore.
+- Active/completed/expired filters and Video/Play/Activity filters.
+- Reward titles and descriptions when supplied by Discord; otherwise directs users to the official Quest page.
+- Relative expiration countdown and absolute expiration/completion timestamps.
+- Expandable details with status, reasons for inactivity and per-Quest progress.
+- Read-only history of completed Quests still in the local store (not a durable history database).
+- Optional in-app alerts while this page is open for newly loaded Quests and expiration within 24 hours.
+- Manual refresh using Discord's existing fetch function.
+- The badge progress tracker already exists in the native Venus Badge settings; no duplicate patch was created.
+
+Source: `patches/src/main/resources/venus/quest_dashboard.js`.
+Integration: `scripts/integrate_quest_dashboard.py`, `scripts/polish_quest_dashboard.py`.
+This dashboard does not accept Quests, submit progress, claim rewards, emulate games or affect account eligibility. Rewards must still be claimed manually in Discord.
+
+The workflow checks bootstrap syntax and adds English placeholders in language packs until human translation. Build CI and real-device acceptance should be verified separately.
