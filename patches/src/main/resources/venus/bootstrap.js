@@ -5961,11 +5961,17 @@
             ].filter(Boolean).join("\n") : null;
             const status=item.completed?tr("Completed"):tr(questDashboardDeadline(item.expires,now));
             const sub=[item.type,status,item.enrolled&&!item.completed?tr("Accepted"):null].filter(Boolean).join(" · ");
-            if (Row) return el(Row,{key:"qd:"+item.id,label:item.name,subLabel:opened?sub+"\n"+details:sub,
-                arrow:true,onPress:()=>setExpanded(opened?null:item.id)});
-            return el(RN.Pressable,{key:item.id,onPress:()=>setExpanded(opened?null:item.id),style:{padding:12}},
-                el(RN.Text,{style:{color:"#ffffff",fontWeight:"600"}},item.name),
-                el(RN.Text,{style:{color:"#b9bbbe"}},sub+(opened?"\n"+details:"")));
+            const detailsPanel=opened ? el(RN.View,{key:"questDetails:"+item.id,
+                style:{paddingHorizontal:16,paddingVertical:12,borderRadius:12,backgroundColor:"#282a31",gap:8}},
+                el(RN.Text,{selectable:true,style:{color:"#d9dce4",fontSize:13,lineHeight:20}},details),
+                item.enrolled&&!item.completed?el(VenusProgress,{key:"questProgress:"+item.id,value:item.progress}):null) : null;
+            if (Row) return el(RN.View,{key:"qd:"+item.id},
+                el(Row,{label:item.name,subLabel:sub,arrow:true,onPress:()=>setExpanded(opened?null:item.id)}),
+                detailsPanel);
+            return el(RN.View,{key:item.id},
+                el(RN.Pressable,{onPress:()=>setExpanded(opened?null:item.id),style:{padding:12}},
+                    el(RN.Text,{style:{color:"#ffffff",fontWeight:"600"}},item.name),
+                    el(RN.Text,{style:{color:"#b9bbbe"}},sub)),detailsPanel);
         });
         return el(RN.View,{key:"questDashboard",style:{gap:10}},
             groupTitle("questDashboardTitle",title),
