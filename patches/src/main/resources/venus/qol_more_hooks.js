@@ -8,7 +8,7 @@ function venusQolReplyDate(message) {
         !/^\d{17,20}$/.test(time) ? new Date(time) : null;
     if ((!date || !Number.isFinite(date.getTime())) && /^\d{17,20}$/.test(String(message.id))) {
         try {
-            const epoch = Number((BigInt(String(message.id)) >> 22n) + 1420070400000n);
+            const epoch = Math.floor(Number(String(message.id)) / 4194304) + 1420070400000;
             if (Number.isFinite(epoch)) date = new Date(epoch);
         } catch (_) {}
     }
