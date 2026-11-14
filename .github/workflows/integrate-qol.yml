@@ -15,7 +15,9 @@ jobs:
       - name: Integrate hooks
         run: python3 scripts/integrate_qol.py
       - name: Validate JavaScript syntax
-        run: node --check patches/src/main/resources/venus/bootstrap.js
+        run: |
+          sed 's@/\*__FEATURES__\*/@{}@' patches/src/main/resources/venus/bootstrap.js > /tmp/venus-bootstrap-check.js
+          node --check /tmp/venus-bootstrap-check.js
       - name: Commit integration
         run: |
           git config user.name "github-actions[bot]"
