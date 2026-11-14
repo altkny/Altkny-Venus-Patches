@@ -17,7 +17,9 @@
     if (features.cleanChannels) selectModules([2068, 5521, 5512, 7635]);
     if (features.favouriteAnything) selectModules([13989, 10035, 10038]);
     if (features.freeNitro) selectModules([1392, 2068, 6243, 6286, 4864, 15066, 7323, 7445]);
-    if (features.reverseImageSearch || features.copyFileContents) targetModules[9978] = 1;
+    if (features.reverseImageSearch || features.copyFileContents || features.imageDescriptions) targetModules[9978] = 1;
+    if (features.channelPreview) selectModules([10596, 17245, 10780]);
+    if (features.replyTimestamp) targetModules[8013] = 1;
     if (features.noTyping) targetModules[12849] = 1;
     if (features.fakeDeafen) selectModules([14755, 18341]);
     if (features.quickDelete) selectModules([5400, 1128]);
@@ -88,7 +90,7 @@
     // Every feature starts off: nothing changes in Discord until you turn it on. Options inside a feature keep
     // their own defaults, so turning a feature on does what it says straight away.
     const settings = { debugLog: true, crashScreen: true, picker: false, voice: false, copyBios: false, favouriteAnything: false, freeNitro: false, emojis: true, stickers: true, hyperlinks: true,
-        reverseImageSearch: false, copyFileContents: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
+        reverseImageSearch: false, copyFileContents: false, replyTimestamp: false, imageDescriptions: false, channelPreview: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
         jumpToTop: false, hiddenChannels: false, hiddenChannelsMenu: true, pastelize:false, pastelAll:false, pastelContent:false, platformIndicators:false, piDmHeader:true, piUserList:true, piProfile:true, piHideMobile:true, reviewDB:false, reviewWarning:true, readAll:false, readAllMode:"guilds",
         quests:false, questsVideo:true, questsPlay:true, questsActivity:true, questsEnroll:true,
         badges:false, badgesGameTime:true, badgesUniqueGames:true, badgesCycleMinutes:15, badgesGamesAtOnce:2, systemFont:false, systemFontSource:"phone",
@@ -106,7 +108,7 @@
     function defaultSettings() {
         return DEFAULT_SETTINGS || (DEFAULT_SETTINGS = Object.freeze({
             debugLog: true, crashScreen: true, picker: false, voice: false, copyBios: false, favouriteAnything: false, freeNitro: false, emojis: true, stickers: true, hyperlinks: true,
-            reverseImageSearch: false, copyFileContents: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
+            reverseImageSearch: false, copyFileContents: false, replyTimestamp: false, imageDescriptions: false, channelPreview: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
             jumpToTop: false, hiddenChannels: false, hiddenChannelsMenu: true, pastelize: false, pastelAll: false, pastelContent: false, platformIndicators: false, piDmHeader: true, piUserList: true, piProfile: true, piHideMobile: true, reviewDB: false, reviewWarning: true, readAll: false, readAllMode: "guilds",
             quests: false, questsVideo: true, questsPlay: true, questsActivity: true, questsEnroll: true,
             badges: false, badgesGameTime: true, badgesUniqueGames: true, badgesCycleMinutes: 15, badgesGamesAtOnce: 2, systemFont: false, systemFontSource: "phone",
@@ -1208,7 +1210,7 @@
     }
     // Discord's own icon for each feature row, from its design system. Resolved when a row first draws, never
     // while Discord builds its settings, and the Account icon stands in if one ever goes missing.
-    const FEATURE_ICONS = {reverseImageSearch:[13827, "ChatSmileIcon"], copyFileContents:[5141, "CopyIcon"], noDelete:[5148, "TrashIcon"], fakeDeafen:[9074, "HeadphonesSlashIcon"], translate:[9415, "LanguageIcon"], gestures:[9252, "ReactionIcon"],
+    const FEATURE_ICONS = {replyTimestamp:[5150, "ClockIcon"], imageDescriptions:[12003, "FileIcon"], channelPreview:[8490, "AtIcon"], reverseImageSearch:[13827, "ChatSmileIcon"], copyFileContents:[5141, "CopyIcon"], noDelete:[5148, "TrashIcon"], fakeDeafen:[9074, "HeadphonesSlashIcon"], translate:[9415, "LanguageIcon"], gestures:[9252, "ReactionIcon"],
         quickDelete:[6573, "CircleXIcon"], jumpToTop:[10796, "ArrowLargeUpIcon"], favouriteAnything:[9851, "StarIcon"],
         freeNitro:[9327, "NitroWheelIcon"], voice:[13531, "WaveformIcon"], splitMessages:[9641, "PaperIcon"], noTyping:[13747, "KeyboardIcon"],
         picker:[10327, "AttachmentIcon"], anonFiles:[6927, "EyeSlashIcon"], pastelize:[16320, "PaintPaletteIcon"], platformIndicators:[15994, "LaptopPhoneIcon"],
@@ -1748,6 +1750,9 @@
         toggle("messages", "favouriteAnything", "Favourite any image or video", "Star any image or video to keep it in your GIF favourites.");
         toggle("messages", "reverseImageSearch", "Reverse image search", "Search an image attachment on TinEye. The image URL is shared with TinEye.");
         toggle("messages", "copyFileContents", "Copy file contents", "Copy text from a small attached text file.");
+        toggle("messages", "replyTimestamp", "Reply timestamp", "Show the original message date on quoted replies.");
+        toggle("messages", "imageDescriptions", "Image descriptions", "Read descriptions provided for attached images.");
+        toggle("servers", "channelPreview", "Channel preview", "Preview only messages already cached on this device.");
         // Sending
         withOptions("sending", "freeNitro", "VENUS_FREENITRO", "Send Nitro stickers and emojis as links", "Sends Nitro emojis and stickers as links that show as the image.", "Nitro stickers and emojis",
             () => ({page:FreeNitroSettings, sections:[section("Send as links", [option("emojis", "Emojis", "Emojis from other servers, and animated emojis.", "VENUS_FREENITRO"),
@@ -8608,6 +8613,7 @@
         if (!result || !row || row.rowType !== 1 || !result.message) return result;
         const pastelOn = enabled("pastelize"), translateOn = enabled("translate"), noDeleteOn = enabled("noDelete"), highlightOn = enabled("messageHighlight"), bulkOn = features.bulkDelete && bulkDelete.active;
         let message = result.message;
+        if (features.replyTimestamp && enabled("replyTimestamp")) message = venusQolReplyTimestamp(message);
         if (pastelOn) message = pastelMessage(message,row.message);
         if (features.pastelize && message.referencedMessage && message.referencedMessage.message) {
             const reply = pastelReply(message.referencedMessage.message);
@@ -21022,6 +21028,93 @@ function copyFileContentsSheet(orig, self, args) {
             }).catch(() => reviewToast(ui, "Couldn't copy this file", venusIcon(6573, "CircleXIcon")));
         });
 }
+// QoL extensions: add inside the existing Venus bootstrap closure.
+// Reply Timestamp decorates only the displayed quoted reply, never its source message.
+function venusQolReplyDate(message) {
+    if (!message || !message.id) return "";
+    let time = message.timestamp;
+    if (time && typeof time === "object" && typeof time.toDate === "function") time = time.toDate();
+    let date = time instanceof Date ? time : typeof time === "number" || typeof time === "string" &&
+        !/^\d{17,20}$/.test(time) ? new Date(time) : null;
+    if ((!date || !Number.isFinite(date.getTime())) && /^\d{17,20}$/.test(String(message.id))) {
+        try {
+            const epoch = Math.floor(Number(String(message.id)) / 4194304) + 1420070400000;
+            if (Number.isFinite(epoch)) date = new Date(epoch);
+        } catch (_) {}
+    }
+    if (!date || !Number.isFinite(date.getTime())) return "";
+    return date.toLocaleString(undefined, {dateStyle:"short", timeStyle:"short"});
+}
+function venusQolReplyTimestamp(message) {
+    if (!enabled("replyTimestamp") || !message || !message.referencedMessage || !message.referencedMessage.message)
+        return message;
+    const quote = message.referencedMessage.message, stamp = venusQolReplyDate(quote);
+    if (!stamp) return message;
+    const content = typeof quote.content === "string" ? quote.content : "";
+    const next = Object.assign({}, quote, {content:(content ? content + "  " : "") + "· " + stamp});
+    return Object.assign({}, message, {referencedMessage:Object.assign({}, message.referencedMessage, {message:next})});
+}
+function venusQolDescriptionsSheet(orig, self, args) {
+    const tree = orig.apply(self, args), props = args[0], message = props && props.message;
+    if (!enabled("imageDescriptions") || !React || !tree || !message || !Array.isArray(message.attachments)) return tree;
+    const texts = message.attachments.filter(a => a && venusQolImage(a) &&
+        typeof a.description === "string" && a.description.trim()).slice(0, 8)
+        .map(a => (a.filename || "Image") + ": " + a.description.trim());
+    if (!texts.length) return tree;
+    return sheetAddRow(tree, props, "venus-image-descriptions", tr("Image descriptions"),
+        venusIcon(12003, "FileIcon"), () =>
+            showProblem("Image descriptions", texts.join("\n\n").slice(0, 5000)));
+}
+function venusQolCachedMessages(channelId) {
+    const store = msgStore || inspectedExport(5532, "default");
+    if (!store || typeof store.getMessages !== "function") return [];
+    let collection;
+    try { collection = store.getMessages(channelId); } catch (_) { return []; }
+    const values = collection && (Array.isArray(collection._array) ? collection._array :
+        typeof collection.toArray === "function" ? collection.toArray() : null);
+    if (!Array.isArray(values)) return [];
+    return values.filter(m => m && typeof m.content === "string" && m.content.trim() && m.type !== 1)
+        .slice(-12).map(m => ({
+            id:String(m.id || ""), author:String(m.author && (m.author.globalName || m.author.username) || "User"),
+            content:m.content.slice(0, 500)
+        }));
+}
+function VenusQolChannelPreview(props) {
+    const ui = reviewUI(), Sheet = ui.ActionSheet || RN.View, rows = venusQolCachedMessages(props.channelId);
+    const header = ui.Header ? el(ui.Header, {title:tr("Channel preview"), trailing:ui.Close ?
+        el(ui.Close, {onPress:() => hideReviewSheet(ui, props.sheetKey)}) : undefined}) : undefined;
+    const body = rows.length ? rows.map(m => el(RN.View, {key:m.id, style:{
+        paddingHorizontal:16, paddingVertical:10, borderBottomWidth:1, borderBottomColor:"#33363a"}},
+        el(RN.Text,{style:{fontWeight:"600",color:"#e9eaf0",marginBottom:4}},m.author),
+        el(RN.Text,{style:{color:"#c6c9d0"}},m.content))) :
+        el(RN.Text,{style:{color:"#9ba0a9",padding:20}},tr("No cached messages. Open this channel first to load them."));
+    const content = el(RN.View,{style:{paddingBottom:24}},body);
+    return el(Sheet,{header,scrollable:true},RN.ScrollView ?
+        el(RN.ScrollView,{style:{maxHeight:480}},content) : content);
+}
+function venusQolOpenChannelPreview(id) {
+    if (!React || !RN) return;
+    const ui = reviewUI();
+    if (typeof ui.showSheet !== "function" || !ui.ActionSheet) {
+        reviewToast(ui, "Channel preview unavailable", venusIcon(6573, "CircleXIcon")); return;
+    }
+    const sheetKey = "VenusQolChannelPreview:" + id;
+    try { ui.showSheet({key:sheetKey,content:el(VenusQolChannelPreview,{channelId:id,sheetKey}),stackingBehavior:"stack"}); }
+    catch (_) { reviewToast(ui, "Channel preview unavailable", venusIcon(6573, "CircleXIcon")); }
+}
+function venusQolChannelPreviewHook(sheetKeyForId) {
+    return sheetInnerHook((tree, props) => {
+        if (!enabled("channelPreview") || !React || !tree || !props) return tree;
+        const channel = props.channel || props.thread || props.post;
+        const id = String(props.channelId || channel && channel.id || "");
+        if (!/^\d{17,20}$/.test(id)) return tree;
+        return sheetAddRow(tree,props,"venus-channel-preview",tr("Preview cached messages"),
+            venusIcon(8490,"AtIcon"),()=>venusQolOpenChannelPreview(id),sheetKeyForId(id));
+    });
+}
+const venusQolChannelMenu = venusQolChannelPreviewHook(id=>"ChannelLongPress-"+id);
+const venusQolThreadMenu = venusQolChannelPreviewHook(()=>"ThreadLongPressActionSheet");
+const venusQolPostMenu = venusQolChannelPreviewHook(()=>"ForumPostLongPressActionSheet");
     // Message menu row.
     function viewRawMessageSheet(orig, self, args) {
         const tree = orig.apply(self, args), props = args[0], message = props && props.message;
@@ -22869,6 +22962,7 @@ function copyFileContentsSheet(orig, self, args) {
                 if (features.viewRaw) exports = hookComponent(exports, viewRawMessageSheet);
                 if (features.reverseImageSearch) exports = hookComponent(exports, reverseImageSearchSheet);
                 if (features.copyFileContents) exports = hookComponent(exports, copyFileContentsSheet);
+                if (features.imageDescriptions) exports = hookComponent(exports, venusQolDescriptionsSheet);
                 return features.bulkDelete ? hookComponent(exports, bulkDeleteSheet) : exports;
             case 9561: return features.splitMessages ? maxLengthModule(exports) : exports;
             case 17538: return (features.youBarSettings || features.accountSwitcher) ? hookComponent(exports, youBarButtons) : exports;
@@ -22876,7 +22970,7 @@ function copyFileContentsSheet(orig, self, args) {
             case 1266: if (features.pastelize) pastelHash = typeof exports === "function" ? exports : exports.default; return exports;
             case 2128: if (features.pastelize) guildMembers = exports.default; if (features.timeoutDuration && exports && exports.default) timeoutTag.members = exports.default; return exports;
             case 8013:
-                if ((features.pastelize || features.noDelete || features.translate || features.messageHighlight || features.bulkDelete || features.staffTag || features.timeoutDuration || features.voiceDownload || features.localEdit) && exports.default && exports.default.prototype)
+                if ((features.pastelize || features.noDelete || features.translate || features.messageHighlight || features.bulkDelete || features.staffTag || features.timeoutDuration || features.voiceDownload || features.localEdit || features.replyTimestamp) && exports.default && exports.default.prototype)
                     hookExport(exports.default.prototype, "generate", messageRow);
                 return exports;
             case 5207: if (features.platformIndicators || features.userNotif) { presenceStore = exports.default; if (features.userNotif) userNotifSeedStatuses(); } return exports;
@@ -22964,9 +23058,14 @@ function copyFileContentsSheet(orig, self, args) {
             case 12849: return features.noTyping ? replaceValue(exports, "default", hookExport(hookExport(exports.default, "startTyping", typing), "stopTyping", typing)) : exports;
             case 10596:
                 if (features.fastDeleteChannels) exports = hookComponent(exports, fastDeleteSheet);
-                return features.viewRaw ? hookComponent(exports, viewRawChannelMenu) : exports;
-            case 17245: return features.viewRaw ? hookComponent(exports, viewRawThreadMenu) : exports;
-            case 10780: return features.viewRaw ? hookComponent(exports, viewRawPostMenu) : exports;
+                if (features.viewRaw) exports = hookComponent(exports, viewRawChannelMenu);
+                return features.channelPreview ? hookComponent(exports, venusQolChannelMenu) : exports;
+            case 17245:
+                if (features.viewRaw) exports = hookComponent(exports, viewRawThreadMenu);
+                return features.channelPreview ? hookComponent(exports, venusQolThreadMenu) : exports;
+            case 10780:
+                if (features.viewRaw) exports = hookComponent(exports, viewRawPostMenu);
+                return features.channelPreview ? hookComponent(exports, venusQolPostMenu) : exports;
             case 14015: return features.viewRaw ? hookComponent(exports, viewRawProfileMenu) : exports;
             case 7158: return features.viewRaw ? hookComponent(exports, viewRawRolesCard) : exports;
             case 7167: return features.viewRaw ? hookExport(exports, "showSimpleActionSheet", viewRawSimpleSheet) : exports;
