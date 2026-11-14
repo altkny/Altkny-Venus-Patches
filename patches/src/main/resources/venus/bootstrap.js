@@ -17,6 +17,7 @@
     if (features.cleanChannels) selectModules([2068, 5521, 5512, 7635]);
     if (features.favouriteAnything) selectModules([13989, 10035, 10038]);
     if (features.freeNitro) selectModules([1392, 2068, 6243, 6286, 4864, 15066, 7323, 7445]);
+    if (features.reverseImageSearch || features.copyFileContents) targetModules[9978] = 1;
     if (features.noTyping) targetModules[12849] = 1;
     if (features.fakeDeafen) selectModules([14755, 18341]);
     if (features.quickDelete) selectModules([5400, 1128]);
@@ -87,7 +88,7 @@
     // Every feature starts off: nothing changes in Discord until you turn it on. Options inside a feature keep
     // their own defaults, so turning a feature on does what it says straight away.
     const settings = { debugLog: true, crashScreen: true, picker: false, voice: false, copyBios: false, favouriteAnything: false, freeNitro: false, emojis: true, stickers: true, hyperlinks: true,
-        noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
+        reverseImageSearch: false, copyFileContents: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
         jumpToTop: false, hiddenChannels: false, hiddenChannelsMenu: true, pastelize:false, pastelAll:false, pastelContent:false, platformIndicators:false, piDmHeader:true, piUserList:true, piProfile:true, piHideMobile:true, reviewDB:false, reviewWarning:true, readAll:false, readAllMode:"guilds",
         quests:false, questsVideo:true, questsPlay:true, questsActivity:true, questsEnroll:true,
         badges:false, badgesGameTime:true, badgesUniqueGames:true, badgesCycleMinutes:15, badgesGamesAtOnce:2, systemFont:false, systemFontSource:"phone",
@@ -105,7 +106,7 @@
     function defaultSettings() {
         return DEFAULT_SETTINGS || (DEFAULT_SETTINGS = Object.freeze({
             debugLog: true, crashScreen: true, picker: false, voice: false, copyBios: false, favouriteAnything: false, freeNitro: false, emojis: true, stickers: true, hyperlinks: true,
-            noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
+            reverseImageSearch: false, copyFileContents: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
             jumpToTop: false, hiddenChannels: false, hiddenChannelsMenu: true, pastelize: false, pastelAll: false, pastelContent: false, platformIndicators: false, piDmHeader: true, piUserList: true, piProfile: true, piHideMobile: true, reviewDB: false, reviewWarning: true, readAll: false, readAllMode: "guilds",
             quests: false, questsVideo: true, questsPlay: true, questsActivity: true, questsEnroll: true,
             badges: false, badgesGameTime: true, badgesUniqueGames: true, badgesCycleMinutes: 15, badgesGamesAtOnce: 2, systemFont: false, systemFontSource: "phone",
@@ -1207,7 +1208,7 @@
     }
     // Discord's own icon for each feature row, from its design system. Resolved when a row first draws, never
     // while Discord builds its settings, and the Account icon stands in if one ever goes missing.
-    const FEATURE_ICONS = {noDelete:[5148, "TrashIcon"], fakeDeafen:[9074, "HeadphonesSlashIcon"], translate:[9415, "LanguageIcon"], gestures:[9252, "ReactionIcon"],
+    const FEATURE_ICONS = {reverseImageSearch:[13827, "ChatSmileIcon"], copyFileContents:[5141, "CopyIcon"], noDelete:[5148, "TrashIcon"], fakeDeafen:[9074, "HeadphonesSlashIcon"], translate:[9415, "LanguageIcon"], gestures:[9252, "ReactionIcon"],
         quickDelete:[6573, "CircleXIcon"], jumpToTop:[10796, "ArrowLargeUpIcon"], favouriteAnything:[9851, "StarIcon"],
         freeNitro:[9327, "NitroWheelIcon"], voice:[13531, "WaveformIcon"], splitMessages:[9641, "PaperIcon"], noTyping:[13747, "KeyboardIcon"],
         picker:[10327, "AttachmentIcon"], anonFiles:[6927, "EyeSlashIcon"], pastelize:[16320, "PaintPaletteIcon"], platformIndicators:[15994, "LaptopPhoneIcon"],
@@ -1745,6 +1746,8 @@
         withOptions("messages", "alwaysTrust", "VENUS_ALWAYSTRUST", "Always trust links and files", "Opens links and files without Discord's \"Are you sure?\" warnings.", "Always trust", AlwaysTrustSettings);
         toggle("messages", "jumpToTop", "Jump to first message", "A button to jump to the start of any chat.");
         toggle("messages", "favouriteAnything", "Favourite any image or video", "Star any image or video to keep it in your GIF favourites.");
+        toggle("messages", "reverseImageSearch", "Reverse image search", "Search an image attachment on TinEye. The image URL is shared with TinEye.");
+        toggle("messages", "copyFileContents", "Copy file contents", "Copy text from a small attached text file.");
         // Sending
         withOptions("sending", "freeNitro", "VENUS_FREENITRO", "Send Nitro stickers and emojis as links", "Sends Nitro emojis and stickers as links that show as the image.", "Nitro stickers and emojis",
             () => ({page:FreeNitroSettings, sections:[section("Send as links", [option("emojis", "Emojis", "Emojis from other servers, and animated emojis.", "VENUS_FREENITRO"),
@@ -20972,6 +20975,53 @@
         const key = "VenusViewRaw:" + spec.kind + ":" + (spec.id || spec.message && spec.message.id);
         try { ui.showSheet({key, content:el(ViewRawSheet, {spec, sheetKey:key}), stackingBehavior:"stack"}); } catch (_) {}
     }
+// Venus QoL experimental hooks for the existing 351.11 message action sheet.
+// This file is intentionally not imported automatically. Integration into
+// bootstrap.js and DiscordPatches.kt is required before the feature is usable.
+const VENUS_QOL_TEXT_LIMIT = 262144;
+function venusQolAttachment(message, predicate) {
+    const items = message && message.attachments;
+    return Array.isArray(items) ? items.find(a => a && predicate(a) &&
+        typeof a.url === "string" && /^https:\/\/(?:cdn\.discordapp\.com|media\.discordapp\.net)\//i.test(a.url)) : null;
+}
+function venusQolImage(a) {
+    return /^image\//i.test(a.content_type || "") ||
+        /\.(?:png|jpe?g|gif|webp|bmp|avif)$/i.test(a.filename || "");
+}
+function venusQolText(a) {
+    if (typeof a.size === "number" && a.size > VENUS_QOL_TEXT_LIMIT) return false;
+    return /^(?:text\/|application\/(?:json|xml|javascript))/i.test(a.content_type || "") ||
+        /\.(?:txt|json|md|csv|log|xml|js|ts|css|html|yml|yaml|ini|toml)$/i.test(a.filename || "");
+}
+function reverseImageSearchSheet(orig, self, args) {
+    const tree = orig.apply(self, args), props = args[0];
+    if (!enabled("reverseImageSearch") || !React || !tree) return tree;
+    const a = venusQolAttachment(props && props.message, venusQolImage);
+    if (!a) return tree;
+    return sheetAddRow(tree, props, "venus-reverse-image-search", tr("Reverse image search"),
+        venusIcon(13827, "ChatSmileIcon"), () => openLink("https://tineye.com/search?url=" + encodeURIComponent(a.url)));
+}
+function copyFileContentsSheet(orig, self, args) {
+    const tree = orig.apply(self, args), props = args[0];
+    if (!enabled("copyFileContents") || !React || !tree) return tree;
+    const a = venusQolAttachment(props && props.message, venusQolText);
+    if (!a) return tree;
+    return sheetAddRow(tree, props, "venus-copy-file-contents", tr("Copy file contents"),
+        venusIcon(5141, "CopyIcon"), () => {
+            const ui = reviewUI(), clip = ui.clipboard || RN && RN.Clipboard;
+            if (!clip || typeof clip.setString !== "function" || typeof fetch !== "function") return;
+            Promise.resolve().then(() => fetch(a.url)).then(response => {
+                if (!response || !response.ok) throw new Error("download failed");
+                const n = Number(response.headers && response.headers.get && response.headers.get("content-length"));
+                if (Number.isFinite(n) && n > VENUS_QOL_TEXT_LIMIT) throw new Error("too large");
+                return response.text();
+            }).then(value => {
+                if (typeof value !== "string" || value.length > VENUS_QOL_TEXT_LIMIT) throw new Error("too large");
+                clip.setString(value);
+                reviewToast(ui, "File text copied", venusIcon(7144, "CircleCheckIcon"));
+            }).catch(() => reviewToast(ui, "Couldn't copy this file", venusIcon(6573, "CircleXIcon")));
+        });
+}
     // Message menu row.
     function viewRawMessageSheet(orig, self, args) {
         const tree = orig.apply(self, args), props = args[0], message = props && props.message;
@@ -22817,6 +22867,8 @@
                 if (features.noDelete) exports = hookComponent(exports, noDeleteSheet);
                 if (features.localEdit) exports = hookComponent(exports, localEditSheet);
                 if (features.viewRaw) exports = hookComponent(exports, viewRawMessageSheet);
+                if (features.reverseImageSearch) exports = hookComponent(exports, reverseImageSearchSheet);
+                if (features.copyFileContents) exports = hookComponent(exports, copyFileContentsSheet);
                 return features.bulkDelete ? hookComponent(exports, bulkDeleteSheet) : exports;
             case 9561: return features.splitMessages ? maxLengthModule(exports) : exports;
             case 17538: return (features.youBarSettings || features.accountSwitcher) ? hookComponent(exports, youBarButtons) : exports;
