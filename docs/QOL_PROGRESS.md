@@ -52,3 +52,11 @@ Integration: `scripts/integrate_quest_dashboard.py`, `scripts/polish_quest_dashb
 This dashboard does not accept Quests, submit progress, claim rewards, emulate games or affect account eligibility. Rewards must still be claimed manually in Discord.
 
 The workflow checks bootstrap syntax and adds English placeholders in language packs until human translation. Build CI and real-device acceptance should be verified separately.
+
+## Parallel Quest dashboard
+
+The existing Quest settings now offer 1, 2, or 3 concurrent tasks (default **1**). The scheduler tracks active Quest entries separately, limits video tasks to one at a time, and keeps unrelated tasks running if a task type is disabled. The background service still displays the first active Quest for compatibility.
+
+The Quest dashboard shows every actively running Quest at the top, with separate live progress bars, progress percentages and time remaining. Accepted Quests waiting for a free slot appear as queued.
+
+Integration source: `scripts/quest_parallel_dashboard.py`; run by `.github/workflows/integrate-qol.yml`. This is experimental until verified in the Discord Android runtime, including account switching and cancellation.
