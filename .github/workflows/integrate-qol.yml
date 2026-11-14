@@ -16,6 +16,7 @@ jobs:
         run: |
           python3 scripts/integrate_qol.py
           python3 scripts/integrate_qol_more.py
+          python3 scripts/integrate_quest_dashboard.py
       - name: Update experimental QoL translations
         run: python3 scripts/qol_i18n.py
       - name: Validate JavaScript syntax
