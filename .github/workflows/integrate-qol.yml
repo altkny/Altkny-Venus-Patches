@@ -1,0 +1,27 @@
+name: Integrate QoL source
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Integrate hooks
+        run: python3 scripts/integrate_qol.py
+      - name: Validate JavaScript syntax
+        run: node --check patches/src/main/resources/venus/bootstrap.js
+      - name: Commit integration
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add patches/src/main/resources/venus/bootstrap.js
+          if ! git diff --cached --quiet; then
+            git commit -m "Integrate QoL message actions in Venus bootstrap"
+            git push
+          fi
