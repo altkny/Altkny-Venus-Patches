@@ -171,6 +171,7 @@
                 text(label,{fontWeight:"600",color:selected?"#c5caff":fg,fontSize:13}));
         };
         const choose=(game)=>{
+            if(game&&game.id) venusRpcWarmApplication(game.id);
             const saved=venusRpcProfiles().find(x=>x.id===game.id || x.applicationId===game.id);
             const p=saved || venusRpcNormalize(Object.assign({},VENUS_RPC_EMPTY,{
                 id:game.id,applicationId:game.id,name:game.name,iconHash:game.icon||""
