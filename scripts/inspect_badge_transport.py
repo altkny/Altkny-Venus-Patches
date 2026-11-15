@@ -53,3 +53,12 @@ for a,b in [(1540,1695),(1760,1920),(1960,2025)]:
     print("\nRANGE",a,b)
     for n in range(a-1,min(len(lines),b)):
         print(f"{n+1}: {lines[n][:330]}")
+
+print("\n========== ROOT SETTINGS SECTIONS ==========")
+for term in ["function settingsSections(", "VENUS_GENERAL", "VENUS_FEATURES", "VENUS_BACKUP", "VENUS_LANGUAGE", "VENUS_RPC_STUDIO", "function nativeRegistry(", "function route("]:
+    hit=[i for i,l in enumerate(lines) if term in l]
+    print("\nTERM",term,"COUNT",len(hit))
+    for i in hit[:4]:
+        print("\nAT",i+1)
+        for n in range(max(0,i-12),min(len(lines),i+26)):
+            print(f"{n+1}: {lines[n][:500]}")
