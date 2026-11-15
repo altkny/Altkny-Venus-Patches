@@ -80,5 +80,20 @@ if 'rpcBusy ? tr("Sharing {name}"' not in s:
         '            rpcBusy ? tr("Sharing {name}",{name:venusRpcSavedProfile()?.name || "activity"}) :\n'
         '            tr("Activity notifications");')
 
+# The Studio is a dedicated root entry in Venus Settings, not a feature row.
+# Existing installations retain the customRpc feature flag for module selection.
+old_row=('        withOptions("advanced", "customRpc", "VENUS_CUSTOM_RPC", "Custom Rich Presence",\n'
+         '            "Game presets, a custom activity editor and a live preview.", "Rich Presence", VenusRpcSettings);\n')
+if old_row in s:
+    replace_once(old_row, '')
+root_route='        route("VENUS_RPC_STUDIO", "Rich Presence", [], undefined, iconFor("customRpc"));\n'
+if root_route not in s:
+    replace_once('        // Language: the language Venus settings are shown, Discord\'s own by default.',
+        '        if (features.customRpc) {\n'
+        + '    '+root_route
+        + '            next.VENUS_RPC_STUDIO.screen.getComponent = () => VenusRpcSettings;\n'
+        + '            next.VENUS_RPC_STUDIO.useDescription = () => "Manage your activity, games and publishing";\n'
+        + '        }\n'
+        + '        // Language: the language Venus settings are shown, Discord\'s own by default.')
 runtime.write_text(s,encoding="utf-8")
 print("Integrated token-free RPC sender, publish controls, restore and foreground service.")
