@@ -41,9 +41,12 @@ object ForegroundApps {
     }
 
     private fun validPackage(text: String): Boolean {
-        if (text.length < 3 || text.length > 128 || !text.contains('.')) return false
+        @Suppress("PLATFORM_CLASS_MAPPED_TO_KOTLIN")
+        val raw = text as java.lang.String
+        if (text.length < 3 || text.length > 128 || raw.indexOf('.'.code) < 0) return false
         for (c in text) {
-            if (!(c in 'a'..'z' || c in 'A'..'Z' || c in '0'..'9' || c == '_' || c == '.'))
+            if (!((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                    (c >= '0' && c <= '9') || c == '_' || c == '.'))
                 return false
         }
         return true
