@@ -1755,8 +1755,6 @@
         toggle("messages", "replyTimestamp", "Reply timestamp", "Show the original message date on quoted replies.");
         toggle("messages", "imageDescriptions", "Image descriptions", "Read descriptions provided for attached images.");
         toggle("servers", "channelPreview", "Channel preview", "Preview only messages already cached on this device.");
-        withOptions("advanced", "customRpc", "VENUS_CUSTOM_RPC", "Custom Rich Presence",
-            "Game presets, a custom activity editor and a live preview.", "Rich Presence", VenusRpcSettings);
         // Sending
         withOptions("sending", "freeNitro", "VENUS_FREENITRO", "Send Nitro stickers and emojis as links", "Sends Nitro emojis and stickers as links that show as the image.", "Nitro stickers and emojis",
             () => ({page:FreeNitroSettings, sections:[section("Send as links", [option("emojis", "Emojis", "Emojis from other servers, and animated emojis.", "VENUS_FREENITRO"),
@@ -1864,6 +1862,11 @@
             const keys = Object.keys(FEATURE_ICONS).filter(key => features[key]);
             return tr("{on} of {total} turned on", {on:keys.filter(key => settings[key]).length, total:keys.length});
         };
+        if (features.customRpc) {
+            route("VENUS_RPC_STUDIO", "Rich Presence", [], undefined, iconFor("customRpc"));
+            next.VENUS_RPC_STUDIO.screen.getComponent = () => VenusRpcSettings;
+            next.VENUS_RPC_STUDIO.useDescription = () => "Manage your activity, games and publishing";
+        }
         // Language: the language Venus settings are shown in, Discord's own by default.
         route("VENUS_LANGUAGE", "Language", [], undefined, venusIcon(9415, "LanguageIcon", icon));
         next.VENUS_LANGUAGE.screen.getComponent = () => LanguageSettings;
@@ -6057,7 +6060,7 @@
     const VENUS_RPC_PID = 20941;
     const venusRpcTransport = {attached:false, connected:false, active:false,
         startedAt:0, profileId:null, error:"", lastSent:0, account:null,
-        lastPayload:null};
+        lastPayload:null, timeOffset:0};
     // Discord's own detectable games directory, loaded on demand only.
     // A search result always carries its real Discord application ID and icon hash.
     const venusRpcCatalog = {games:null,loading:null,at:0,error:"",source:"fallback"};
@@ -6149,12 +6152,22 @@
     }
     function venusRpcBuildActivity(profile, startedAt) {
         const p=venusRpcNormalize(profile), app=venusRpcAppId(p);
-        if (!app) return {error:"No registered Discord Application ID for this profile."};
+        if (!app && p.sendMode!=="compat") return {error:"This game needs an Application ID. Try Compatibility mode."};
         if (!p.name) return {error:"An activity name is required."};
         const buttons=p.buttons.filter(b=>b.label&&venusRpcValidUrl(b.url)).slice(0,2);
         if (p.buttons.some(b=>(b.label||b.url)&&(!b.label||!venusRpcValidUrl(b.url))))
             return {error:"Each button needs a name and a valid HTTPS URL."};
-        const activity={name:p.name,application_id:app,type:0,flags:0};
+        // Both modes use the already-authenticated local client dispatcher.
+        // Compatibility sends a simplified game presence without an app ID.
+        // It is not a Kizzy/Gateway connection and may still be filtered.
+        const mode=p.sendMode==="compat"?"compat":"rich";
+        const kind=[0,1,2,3,5].includes(p.type)?p.type:0;
+        const activity={name:p.name,type:kind,flags:0};
+        if(mode==="rich") activity.application_id=app;
+        if(kind===1&&p.streamUrl){
+            if(!venusRpcValidUrl(p.streamUrl)) return {error:"Streaming URL must be HTTPS."};
+            activity.url=p.streamUrl;
+        }
         if(p.details) activity.details=p.details;
         if(p.state) activity.state=p.state;
         if(p.elapsed) activity.timestamps={start:startedAt};
@@ -6165,7 +6178,7 @@
         if(p.smallImage) assets.small_image=p.smallImage;
         if(p.largeText) assets.large_text=p.largeText;
         if(p.smallText) assets.small_text=p.smallText;
-        if(Object.keys(assets).length) activity.assets=assets;
+        if(Object.keys(assets).length&&mode==="rich") activity.assets=assets;
         if(buttons.length) {
             activity.buttons=buttons.map(b=>b.label);
             activity.metadata={button_urls:buttons.map(b=>b.url)};
@@ -6186,6 +6199,7 @@
         venusRpcTransport.profileId=null;
         venusRpcTransport.startedAt=0;
         venusRpcTransport.lastPayload=null;
+        venusRpcTransport.timeOffset=0;
         if(was) venusRpcDispatch(null);
         // An explicit stop clears the stored epoch. Logout/account switches
         // retain it for the same account, but never publish it to another.
@@ -6202,8 +6216,12 @@
         if(resumed&&settings.rpcAccountId&&settings.rpcAccountId!==currentId())
             return {ok:false,error:"This RPC timer belongs to another Discord account."};
         const p=venusRpcNormalize(profile);
-        const start=resumed ?
-            (venusRpcTransport.startedAt||venusRpcStoredStart()||Date.now()) : Date.now();
+        const offset=Math.max(0,Math.min(7*86400,Math.floor(Number(p.timeOffsetSeconds)||0)));
+        const sameProfile=venusRpcTransport.active&&venusRpcTransport.profileId===p.id;
+        const changedOffset=sameProfile&&venusRpcTransport.timeOffset!==offset;
+        // Only explicit offset edits modify the epoch. Routine updates keep it.
+        const start=!resumed||changedOffset?Date.now()-offset*1000:
+            (venusRpcTransport.startedAt||venusRpcStoredStart()||Date.now()-offset*1000);
         const built=venusRpcBuildActivity(p,start);
         if(built.error) {
             venusRpcTransport.error=built.error;
@@ -6231,8 +6249,9 @@
         venusRpcTransport.account=currentId();
         venusRpcTransport.lastSent=Date.now();
         venusRpcTransport.lastPayload=payload;
+        venusRpcTransport.timeOffset=offset;
         venusRpcTransport.error="";
-        if(!resumed || !venusRpcStoredStart()){
+        if(!resumed || changedOffset || !venusRpcStoredStart()){
             setSetting("rpcStartedAt",start);
             setSetting("rpcAccountId",currentId());
         }
@@ -6283,8 +6302,12 @@
         "Counter-Strike 2","League of Legends","Apex Legends","ELDEN RING",
         "Overwatch","Dota 2"
     ];
+    const VENUS_RPC_TYPES = [
+        [0,"Playing"],[2,"Listening"],[3,"Watching"],[1,"Streaming"],[5,"Competing"]
+    ];
     const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",applicationId:"",details:"",state:"",
         iconHash:"",largeImage:"",smallImage:"",largeText:"",smallText:"",
+        type:0,streamUrl:"",sendMode:"rich",timeOffsetSeconds:0,
         elapsed:true,buttons:[{label:"",url:""},{label:"",url:""}]};
     function venusRpcClean(x,n) { return typeof x === "string" ? x.trim().slice(0,n || 128) : ""; }
     function venusRpcNormalize(value) {
@@ -6298,6 +6321,10 @@
             details:venusRpcClean(p.details),state:venusRpcClean(p.state),
             largeImage:venusRpcClean(p.largeImage,256),smallImage:venusRpcClean(p.smallImage,256),
             largeText:venusRpcClean(p.largeText),smallText:venusRpcClean(p.smallText),
+            type:[0,1,2,3,5].includes(Number(p.type))?Number(p.type):0,
+            streamUrl:venusRpcClean(p.streamUrl,512),
+            sendMode:p.sendMode==="compat"?"compat":"rich",
+            timeOffsetSeconds:Math.max(0,Math.min(7*86400,Math.floor(Number(p.timeOffsetSeconds)||0))),
             elapsed:p.elapsed === true,
             buttons:[0,1].map(i=>({label:venusRpcClean(buttons[i] && buttons[i].label,32),
                 url:venusRpcClean(buttons[i] && buttons[i].url,512)}))
@@ -6370,6 +6397,15 @@
             }):el(RN.Text,{style:{fontSize:size<40?10:12,color:"#d1d8ff",fontWeight:"700"}},
                 props.label||"GAME"));
     }
+    function venusRpcParseTime(value) {
+        const x=String(value||"").trim();
+        if(!/^(?:\d{1,3}:)?\d{1,2}:\d{1,2}$/.test(x)) return null;
+        const parts=x.split(":").map(Number);
+        const h=parts.length===3?parts[0]:0,m=parts.length===3?parts[1]:parts[0],s=parts[parts.length-1];
+        if(m>59||s>59) return null;
+        const n=h*3600+m*60+s;
+        return n<=7*86400?n:null;
+    }
     function VenusRpcSettings() {
         useSettings("rpcProfiles"); useSettings("rpcSelected"); useSettings("rpcEnabled"); useSettings("rpcCatalog");
         const [profile,edit]=React.useState(()=>venusRpcNormalize(
@@ -6380,6 +6416,10 @@
         const [search,setSearch]=React.useState("");
         const [visible,setVisible]=React.useState(12);
         const [liveSync,setLiveSync]=React.useState(true);
+        const [tab,setTab]=React.useState("games");
+        const [manualTime,setManualTime]=React.useState(()=>
+            venusRpcTime(venusRpcNormalize(venusRpcProfiles().find(x=>x.id===settings.rpcSelected)||
+                VENUS_RPC_EMPTY).timeOffsetSeconds));
         const rpcRunning=!!(settings.rpcEnabled && venusRpcTransport.active);
         React.useEffect(()=>{
             let active=true;
@@ -6432,12 +6472,18 @@
             const p=saved || venusRpcNormalize(Object.assign({},VENUS_RPC_EMPTY,{
                 id:game.id,applicationId:game.id,name:game.name,iconHash:game.icon||""
             }));
-            edit(p);setStarted(Date.now());setNotice("");
+            edit(p);
+            setManualTime(venusRpcTime(p.timeOffsetSeconds));
+            setStarted(Date.now()-p.timeOffsetSeconds*1000);
+            setNotice("");
         };
         const custom=()=>{
             const saved=venusRpcProfiles().find(x=>x.id==="custom");
-            edit(saved || venusRpcNormalize(VENUS_RPC_EMPTY));
-            setStarted(Date.now());setNotice("");
+            const p=saved||venusRpcNormalize(VENUS_RPC_EMPTY);
+            edit(p);
+            setManualTime(venusRpcTime(p.timeOffsetSeconds));
+            setStarted(Date.now()-p.timeOffsetSeconds*1000);
+            setTab("editor");setNotice("");
         };
         const updateButton=(index,key,value)=>edit(p=>{
             const buttons=p.buttons.map(x=>Object.assign({},x));
@@ -6468,7 +6514,7 @@
             backgroundSync();
             edit(p);
             setStarted(venusRpcTransport.startedAt);
-            setNotice("Activity updated in Discord.");
+            setNotice("Activity dispatched. Another Discord client must confirm its public visibility.");
         };
         const stopCurrent=()=>{
             setSetting("rpcEnabled",false);
@@ -6484,8 +6530,10 @@
             setNotice("Saved profile removed.");
         };
         const resetTimer=()=>{
+            const p=venusRpcNormalize(Object.assign({},profile,{timeOffsetSeconds:0}));
+            edit(p);setManualTime("00:00:00");
             if(rpcRunning&&venusRpcTransport.profileId===profile.id){
-                const result=venusRpcPublish(profile,false);
+                const result=venusRpcPublish(p,false);
                 if(!result.ok){setNotice(result.error);return;}
                 setStarted(venusRpcTransport.startedAt);
                 setNotice("Timer restarted in Discord and in the preview.");
@@ -6494,6 +6542,31 @@
                 setNotice("Preview timer restarted.");
             }
         };
+        const applyManualTime=()=>{
+            const seconds=venusRpcParseTime(manualTime);
+            if(seconds===null){setNotice("Use HH:MM:SS, up to 168 hours.");return;}
+            edit(p=>Object.assign({},p,{timeOffsetSeconds:seconds}));
+            setStarted(Date.now()-seconds*1000);
+            setNotice("Elapsed time adjusted. Publish to apply it to your activity.");
+        };
+        const typePicker=el(RN.View,{key:"typePicker",style:{gap:8}},
+            text("Activity style",{fontSize:14,fontWeight:"700"}),
+            el(RN.View,{style:{flexDirection:"row",flexWrap:"wrap",gap:7}},
+                VENUS_RPC_TYPES.map(([kind,label])=>
+                    button(label,()=>edit(p=>Object.assign({},p,{type:kind})),
+                        profile.type===kind,"kind:"+kind))));
+        const deliveryPicker=el(RN.View,{key:"delivery",style:{gap:9}},
+            text("Publication format",{fontSize:15,fontWeight:"700"}),
+            button("Full Rich Presence · Application ID",()=>
+                edit(p=>Object.assign({},p,{sendMode:"rich"})),
+                profile.sendMode!=="compat","rich"),
+            button("Compatibility · Name-only game",()=>
+                edit(p=>Object.assign({},p,{sendMode:"compat"})),
+                profile.sendMode==="compat","compat"),
+            text("Both use the local Discord client. Compatibility removes the Application ID and custom assets. It may help with unsupported game IDs, but visibility is not guaranteed.",
+                {color:muted,fontSize:12,lineHeight:18}),
+            text("Kizzy-style Gateway authentication is not included: the Venus patch will not extract or request your Discord account token.",
+                {color:muted,fontSize:12,lineHeight:18}));
         const image=(p,small,size)=>el(VenusRpcCover,{
             key:(small?"small:":"cover:")+(venusRpcPreviewImage(p,small)||"none"),
             uri:venusRpcPreviewImage(p,small),size:size||64,circle:!!small,
@@ -6504,7 +6577,9 @@
         const preview=el(RN.View,{key:"preview",accessible:true,style:{borderRadius:16,
             backgroundColor:"#20232b",borderWidth:1,borderColor:"#414651",padding:15,gap:10}},
             el(RN.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}},
-                text("PLAYING A GAME",{fontSize:11,color:muted,fontWeight:"700",letterSpacing:1}),
+                text((VENUS_RPC_TYPES.find(row=>row[0]===profile.type)||VENUS_RPC_TYPES[0])[1].toUpperCase()+
+                    " · "+(profile.sendMode==="compat"?"COMPATIBILITY":"RICH PRESENCE"),
+                    {fontSize:10,color:muted,fontWeight:"700",letterSpacing:0.5}),
                 text("LIVE PREVIEW",{fontSize:10,color:"#a8b0ff",fontWeight:"700"})),
             el(RN.View,{style:{flexDirection:"row",gap:12,alignItems:"center"}},
                 el(RN.View,{style:{width:72,height:72,justifyContent:"center",alignItems:"center",
@@ -6581,7 +6656,7 @@
         const savedRows=saved.length?el(RN.View,{key:"saved",style:{gap:8}},
             text("Saved profiles",{fontSize:15,fontWeight:"700"}),
             el(RN.View,{style:{flexDirection:"row",flexWrap:"wrap",gap:7}},
-                saved.map(p=>button(p.name,()=>choose(p.id,p.name),p.id===profile.id,p.id+"saved")))):null;
+                saved.map(p=>button(p.name,()=>choose(p),p.id===profile.id,p.id+"saved")))):null;
         const buttons=[0,1].map(i=>el(RN.View,{key:"custombutton"+i,style:{gap:6,marginVertical:4}},
             text("Button "+(i+1),{fontSize:13,fontWeight:"700"}),
             el(RN.TextInput,{accessibilityLabel:"Button "+(i+1)+" label",value:profile.buttons[i].label,
@@ -6593,37 +6668,105 @@
                 autoCapitalize:"none",autoCorrect:false,keyboardType:"url",
                 style:{color:fg,backgroundColor:"#171a21",padding:10,borderRadius:10},
                 onChangeText:value=>updateButton(i,"url",value)})));
-        const sections=[
-            el(RN.View,{key:"title",style:{gap:5}},text("Custom Rich Presence",{fontSize:20,fontWeight:"700"}),
-                text("Game presets, custom profiles and an instant Discord-style preview.",{color:muted})),
-            preview,
-            text("Choose a game",{fontSize:16,fontWeight:"700"}),presets,
-            savedRows,
-            text("Edit activity",{fontSize:15,fontWeight:"700"}),
+        const menu=el(RN.View,{key:"navigation",style:{flexDirection:"row",gap:7}},
+            [["games","Games"],["editor","Customize"],["send","Publication"]].map(([id,label])=>
+                el(RN.Pressable,{key:id,onPress:()=>setTab(id),accessibilityRole:"tab",
+                    accessibilityState:{selected:tab===id},
+                    style:{flex:1,alignItems:"center",paddingVertical:12,borderRadius:12,
+                        borderColor:tab===id?"#9aa3ff":"#414552",borderWidth:1,
+                        backgroundColor:tab===id?"#505c9a":"#272b37"}},
+                    text(label,{fontSize:12,fontWeight:tab===id?"700":"500"}))));
+        const elapsedPicker=el(RN.View,{key:"elapsedPicker",style:{gap:9}},
+            el(RN.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}},
+                text("Show elapsed time",{fontSize:13,fontWeight:"600"}),
+                el(RN.Switch,{value:profile.elapsed,onValueChange:v=>
+                    edit(p=>Object.assign({},p,{elapsed:v}))})),
+            text("Start at a custom elapsed time",{fontSize:12,color:muted}),
+            el(RN.View,{style:{flexDirection:"row",gap:8,alignItems:"center"}},
+                el(RN.TextInput,{accessibilityLabel:"Elapsed time HH:MM:SS",
+                    value:manualTime,onChangeText:setManualTime,placeholder:"HH:MM:SS",
+                    placeholderTextColor:muted,autoCorrect:false,keyboardType:"numbers-and-punctuation",
+                    style:{flex:1,color:fg,backgroundColor:"#171a21",borderColor:line,
+                        borderWidth:1,padding:11,borderRadius:10}}),
+                button("Apply",applyManualTime,false,"applyElapsed")),
+            text("Example: 02:30:00 starts the activity at 2 hours and 30 minutes. Maximum: 168 hours.",
+                {fontSize:11,color:muted}),
+            el(RN.View,{style:{flexDirection:"row",gap:7,flexWrap:"wrap"}},
+                button("Start now",resetTimer,false,"resetElapsed"),
+                button("+5 minutes",()=>{
+                    const base=venusRpcParseTime(manualTime)||0;
+                    setManualTime(venusRpcTime(Math.min(7*86400,base+300)));
+                },false,"timePlus5"),
+                button("+1 hour",()=>{
+                    const base=venusRpcParseTime(manualTime)||0;
+                    setManualTime(venusRpcTime(Math.min(7*86400,base+3600)));
+                },false,"timePlus1h")));
+        const editor=el(RN.View,{key:"editorTab",style:{gap:10}},
+            text("Activity type",{fontSize:17,fontWeight:"700"}),
+            typePicker,
+            text("Game and status",{fontSize:16,fontWeight:"700"}),
             field("Activity name","name","Minecraft"),
-            field("Discord Application ID","applicationId","Optional for recognized game presets",20),
             field("Details","details","Exploring the Overworld"),
             field("State","state","In a world"),
-            field("Large image URL (HTTPS)","largeImage","https://example.com/image.png",256),
-            field("Large image hint","largeText","Cover art"),
-            field("Small image URL (HTTPS)","smallImage","https://example.com/icon.png",256),
-            field("Small image hint","smallText","Icon"),
-            el(RN.View,{key:"timer",style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingVertical:6}},
-                text("Elapsed-time counter"),
-                el(RN.Switch,{value:profile.elapsed,onValueChange:v=>{edit(p=>Object.assign({},p,{elapsed:v}));setStarted(Date.now());}})),
-            el(RN.View,{key:"liveSync",style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingVertical:6}},
-                text("Auto-sync changes while active"),
+            profile.type===1?field("Streaming URL","streamUrl","https://twitch.tv/channel",512):null,
+            text("Activity timer",{fontSize:16,fontWeight:"700"}),elapsedPicker,
+            text("Artwork",{fontSize:16,fontWeight:"700"}),
+            field("Large image URL or asset ID","largeImage","https://example.com/art.png",256),
+            field("Large image description","largeText","Cover art"),
+            field("Small image URL or asset ID","smallImage","https://example.com/icon.png",256),
+            field("Small image description","smallText","Icon"),
+            text("Activity buttons",{fontSize:16,fontWeight:"700"}),
+            ...buttons);
+        const sending=el(RN.View,{key:"sendingTab",style:{gap:10}},
+            text("How activity is sent",{fontSize:18,fontWeight:"700"}),
+            deliveryPicker,
+            text("Discord application",{fontSize:16,fontWeight:"700"}),
+            field("Application ID","applicationId","Enter the game's registered ID",20),
+            text("A game in the searchable directory is not necessarily publishable as Rich Presence. Discord may filter unsupported applications.",
+                {fontSize:12,color:muted,lineHeight:18}),
+            el(RN.View,{style:{flexDirection:"row",alignItems:"center",justifyContent:"space-between"}},
+                text("Sync edits automatically",{fontSize:13,fontWeight:"600"}),
                 el(RN.Switch,{value:liveSync,onValueChange:setLiveSync})),
-            text("Optional links",{fontSize:15,fontWeight:"700"}),
-            ...buttons,
+            text("Automatic synchronization sends only changed payloads. The timestamp stays unchanged unless you edit the timer.",
+                {fontSize:12,color:muted,lineHeight:18}),
+            text("Connection diagnostics",{fontSize:16,fontWeight:"700"}),
+            text("Sender: local Discord activity dispatcher",{fontSize:12,color:muted}),
+            text("Last dispatch: "+(venusRpcTransport.lastSent?
+                new Date(venusRpcTransport.lastSent).toLocaleTimeString():"Not sent yet"),
+                {fontSize:12,color:muted}),
+            text("Result: "+(venusRpcTransport.error||"No local error detected"),
+                {fontSize:12,color:venusRpcTransport.error?"#ffbcab":muted}),
+            button("Switch to compatibility and publish",()=>{
+                const p=venusRpcNormalize(Object.assign({},profile,{sendMode:"compat"}));
+                edit(p);
+                const result=venusRpcPublish(p,false);
+                if(!result.ok){setNotice(result.error);return;}
+                const profiles=venusRpcProfiles().filter(x=>x.id!==p.id);
+                profiles.unshift(p);
+                setSetting("rpcProfiles",JSON.stringify(profiles.slice(0,32)));
+                setSetting("rpcSelected",p.id);
+                setSetting("rpcEnabled",true);
+                setNotice("Compatibility presence sent. Check its visibility on another client.");
+            },false,"compatPublish"));
+        const sections=[
+            el(RN.View,{key:"title",style:{gap:5}},
+                text("Rich Presence Studio",{fontSize:21,fontWeight:"800"}),
+                text("Live activity, artwork, game library and publishing controls.",{color:muted,fontSize:12})),
+            preview,
             el(RN.View,{key:"actions",style:{flexDirection:"row",flexWrap:"wrap",gap:8}},
-                button("Publish activity",publishCurrent,true),
-                button("Stop publishing",stopCurrent,false),
-                button("Save profile",saveCurrent,false),
-                button("Reset timer",resetTimer,false),
-                button("Delete saved",removeCurrent,false)),
-            notice?text(notice,{color:"#e7c88a"}):null,
-            text("Experimental: this sends a local activity event through the signed-in Discord client. No token is requested. External visibility, images and buttons are not guaranteed; Discord may reject the activity.",{color:muted,fontSize:12,lineHeight:18})
+                button(rpcRunning?"Update activity":"Publish activity",publishCurrent,true),
+                button("Stop",stopCurrent,false),
+                button("Save",saveCurrent,false)),
+            notice?text(notice,{color:"#e7c88a",fontSize:12}):null,
+            menu,
+            tab==="games"?el(RN.View,{key:"gamesTab",style:{gap:11}},
+                savedRows,presets):null,
+            tab==="editor"?editor:null,
+            tab==="send"?sending:null,
+            tab==="editor"?el(RN.View,{key:"editActions",style:{flexDirection:"row",flexWrap:"wrap",gap:8}},
+                button("Delete saved",removeCurrent,false)):null,
+            text("The preview is local. Other Discord clients control which activities, buttons and elapsed seconds they display.",
+                {fontSize:11,color:muted,lineHeight:17})
         ];
         return el(RN.ScrollView,{key:"venusRpcEditor",keyboardShouldPersistTaps:"handled",
             contentContainerStyle:{padding:16,paddingBottom:40,gap:12}},...sections);
