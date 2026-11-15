@@ -11,6 +11,7 @@ runtime=root/"patches/src/main/resources/venus/bootstrap.js"
 ui=root/"patches/src/main/resources/venus/rpc_editor.js"
 transport=root/"patches/src/main/resources/venus/rpc_transport.js"
 gateway=root/"patches/src/main/resources/venus/rpc_gateway.js"
+detector=root/"patches/src/main/resources/venus/rpc_detection.js"
 s=runtime.read_text(encoding="utf-8")
 
 def replace_once(old,new):
@@ -43,6 +44,9 @@ transport_src=transport_src[transport_src.index(transport_begin):].rstrip()+"\n"
 gateway_src=gateway.read_text(encoding="utf-8")
 gateway_begin='    const VENUS_RPC_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";'
 transport_src+=gateway_src[gateway_src.index(gateway_begin):].rstrip()+"\n"
+detector_src=detector.read_text(encoding="utf-8")
+detector_begin='    const VENUS_RPC_KNOWN_PACKAGES = Object.freeze({'
+transport_src+=detector_src[detector_src.index(detector_begin):].rstrip()+"\n"
 if transport_begin in s:
     # The standalone transport source is authoritative on every integration.
     # Keep its existing comment prefix and replace only our own code.
@@ -110,4 +114,4 @@ elif new_venus not in s:
 assert s.count('VENUS_RPC_STUDIO", "VENUS_LANGUAGE"') <= 1 or new_venus in s
 
 runtime.write_text(s,encoding="utf-8")
-print("Integrated local RPC, opt-in Kizzy-style Gateway, navigation and foreground service.")
+print("Integrated local RPC, Kizzy Gateway, opt-in Android foreground-app detection and Venus navigation.")
