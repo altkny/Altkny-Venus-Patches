@@ -1,0 +1,11 @@
+"use strict";
+const fs=require("node:fs");
+const assert=require("node:assert/strict");
+const bootstrap=fs.readFileSync("patches/src/main/resources/venus/bootstrap.js","utf8");
+const integration=fs.readFileSync("scripts/integrate_rpc_transport.py","utf8");
+assert.match(bootstrap,/route\("VENUS_RPC_STUDIO",\s*"Rich Presence"/);
+assert.match(bootstrap,/next\.VENUS_RPC_STUDIO\.screen\.getComponent\s*=\s*\(\)\s*=>\s*VenusRpcSettings/);
+assert.match(bootstrap,/section\("Venus",\s*\["VENUS_PLUGINS",\s*\.\.\.\(features\.customRpc\s*\?\s*\["VENUS_RPC_STUDIO"\]/);
+assert.match(integration,/new_venus=.*VENUS_RPC_STUDIO/);
+assert.equal((bootstrap.match(/route\("VENUS_RPC_STUDIO"/g)||[]).length,1);
+console.log("RPC navigation checks passed: root route is present AND visible inside Venus section.");
