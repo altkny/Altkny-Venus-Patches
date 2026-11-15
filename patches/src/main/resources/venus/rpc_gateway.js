@@ -22,6 +22,9 @@
         // Ephemeral memory only. The token is not passed to setSetting or logged.
         venusRpcGateway.credential=token.trim();
         venusRpcGateway.acknowledged=true;
+        // A replaced credential requires a new Gateway send, even if the
+        // Rich Presence payload itself has not changed.
+        venusRpcTransport.lastPayload=null;
         venusRpcGatewayStatus("ready","");
         return {ok:true,error:""};
     }
