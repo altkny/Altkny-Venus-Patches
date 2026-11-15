@@ -36,7 +36,7 @@ for a,b in [(1690,1760),(1840,1880)]:
   print(f"{n+1}: {lines[n][:450]}")
 
 print("\\n### BADGE TRANSPORT INSPECTION ###")
-for ptn in [r'function badges[A-Z][A-Za-z]*\\(',r'function badge[A-Z][A-Za-z]*\\(',r'function BadgeSettings\\(',r'function (?:badge|badges)[A-Za-z]+\\(',r'badge(?:s)?\\.(?:socket|client|session|activity)',r'PRESENCE_UPDATE']:
+for ptn in [r'function badges[A-Z][A-Za-z]*\(',r'function badge[A-Z][A-Za-z]*\(',r'function BadgeSettings\(',r'function (?:badge|badges)[A-Za-z]+\(',r'badge(?:s)?\.(?:socket|client|session|activity)',r'PRESENCE_UPDATE']:
  found=list(re.finditer(ptn,s,re.I))[:20]
  print("PATTERN",ptn,"COUNT",len(found))
  for m in found[:12]:
