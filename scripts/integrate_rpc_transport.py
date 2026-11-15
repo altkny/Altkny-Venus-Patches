@@ -36,7 +36,17 @@ new=new[new.index(begin):].rstrip()+"\n"
 if original != new:
     s=s[:a]+new+s[b:]
 
-if 'const VENUS_RPC_SOCKET = "venus-custom-rpc";' not in s:
+transport_begin='    const VENUS_RPC_SOCKET = "venus-custom-rpc";'
+transport_src=transport.read_text(encoding="utf-8")
+transport_src=transport_src[transport_src.index(transport_begin):].rstrip()+"\n"
+if transport_begin in s:
+    # The standalone transport source is authoritative on every integration.
+    # Keep its existing comment prefix and replace only our own code.
+    start=s.index(transport_begin)
+    stop=s.index(begin,start)
+    if s[start:stop] != transport_src:
+        s=s[:start]+transport_src+s[stop:]
+else:
     # Transport is loaded before the editor; both share the bootstrap closure.
     replace_once(begin,transport.read_text(encoding="utf-8").rstrip()+"\n"+begin)
 
