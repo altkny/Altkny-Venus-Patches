@@ -1,0 +1,174 @@
+// Custom Rich Presence UI for the existing Venus bootstrap closure.
+// Activity publisher is intentionally not claimed until a verified Android transport exists.
+    const VENUS_RPC_GAMES = [
+        ["minecraft","Minecraft"], ["roblox","Roblox"], ["gtav","Grand Theft Auto V"],
+        ["valorant","VALORANT"], ["fortnite","Fortnite"], ["genshin","Genshin Impact"],
+        ["stardew","Stardew Valley"], ["terraria","Terraria"]
+    ];
+    const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",details:"",state:"",
+        largeImage:"",smallImage:"",largeText:"",smallText:"",
+        elapsed:true,buttons:[{label:"",url:""},{label:"",url:""}]};
+    function venusRpcClean(x,n) { return typeof x === "string" ? x.trim().slice(0,n || 128) : ""; }
+    function venusRpcNormalize(value) {
+        const p = value && typeof value === "object" ? value : {};
+        const buttons = Array.isArray(p.buttons) ? p.buttons : [];
+        return {
+            id:venusRpcClean(p.id,64) || "custom",
+            name:venusRpcClean(p.name) || "Custom Activity",
+            details:venusRpcClean(p.details),state:venusRpcClean(p.state),
+            largeImage:venusRpcClean(p.largeImage,256),smallImage:venusRpcClean(p.smallImage,256),
+            largeText:venusRpcClean(p.largeText),smallText:venusRpcClean(p.smallText),
+            elapsed:p.elapsed === true,
+            buttons:[0,1].map(i=>({label:venusRpcClean(buttons[i] && buttons[i].label,32),
+                url:venusRpcClean(buttons[i] && buttons[i].url,512)}))
+        };
+    }
+    function venusRpcProfiles() {
+        try {
+            const a=JSON.parse(settings.rpcProfiles || "[]");
+            return Array.isArray(a) ? a.slice(0,32).map(venusRpcNormalize) : [];
+        } catch (_) { return []; }
+    }
+    function venusRpcValidUrl(url) { return /^https:\/\/[^\s]+$/i.test(url); }
+    function venusRpcTime(seconds) {
+        const n=Math.max(0,Math.floor(seconds)), h=Math.floor(n/3600), m=Math.floor(n%3600/60), s=n%60;
+        return (h ? h+":" : "")+String(m).padStart(h?2:1,"0")+":"+String(s).padStart(2,"0");
+    }
+    function VenusRpcSettings() {
+        useSettings("rpcProfiles"); useSettings("rpcSelected");
+        const [profile,edit]=React.useState(()=>venusRpcNormalize(
+            venusRpcProfiles().find(x=>x.id===settings.rpcSelected) ||
+            Object.assign({},VENUS_RPC_EMPTY,{name:"Minecraft",id:"minecraft"})));
+        const [started,setStarted]=React.useState(Date.now());
+        const [tick,setTick]=React.useState(0);
+        const [notice,setNotice]=React.useState("");
+        const [newId,setNewId]=React.useState("");
+        React.useEffect(()=>{
+            if (!profile.elapsed) return;
+            const timer=global.setInterval?global.setInterval(()=>setTick(t=>t+1),1000):null;
+            return ()=>{if (timer !== null && global.clearInterval) global.clearInterval(timer);};
+        },[profile.elapsed]);
+        if (!RN || !React) return null;
+        const fg="#f2f3f5", muted="#a7abb6", line="#343842", panel="#262a34", accent="#7983f5";
+        const text=(value,style)=>el(RN.Text,{style:Object.assign({color:fg,fontSize:14},style||{})},value);
+        const field=(label,key,placeholder,limit)=>{
+            const value=profile[key] || "";
+            return el(RN.View,{key:"rpc:"+key,style:{gap:6,marginBottom:9}},
+                text(label,{fontSize:12,color:muted,fontWeight:"600"}),
+                el(RN.TextInput,{
+                    accessibilityLabel:label,
+                    style:{color:fg,backgroundColor:"#171a21",borderWidth:1,borderColor:line,
+                        borderRadius:10,paddingHorizontal:12,paddingVertical:9,fontSize:14},
+                    value,placeholder,placeholderTextColor:"#818792",
+                    maxLength:limit||128,autoCorrect:false,
+                    onChangeText:v=>edit(p=>Object.assign({},p,{[key]:v}))}));
+        };
+        const button=(label,press,selected,key)=>{
+            return el(RN.Pressable,{key:key||label,accessibilityRole:"button",onPress:press,
+                style:{paddingVertical:10,paddingHorizontal:13,borderRadius:10,
+                    borderWidth:1,borderColor:selected?accent:line,backgroundColor:selected?"#5865f23a":panel}},
+                text(label,{fontWeight:"600",color:selected?"#c5caff":fg,fontSize:13}));
+        };
+        const choose=(id,name)=>{
+            const saved=venusRpcProfiles().find(x=>x.id===id);
+            edit(saved || venusRpcNormalize(Object.assign({},VENUS_RPC_EMPTY,{id,name})));
+            setNewId("");setStarted(Date.now());setNotice("");
+        };
+        const updateButton=(index,key,value)=>edit(p=>{
+            const buttons=p.buttons.map(x=>Object.assign({},x));
+            buttons[index][key]=value;
+            return Object.assign({},p,{buttons});
+        });
+        const saveCurrent=()=>{
+            const p=venusRpcNormalize(profile);
+            if (!p.name) {setNotice("Choose a name first.");return;}
+            const invalid=p.buttons.some(b=>(b.label||b.url) && (!b.label||!venusRpcValidUrl(b.url)));
+            if (invalid) {setNotice("Buttons need a label and a valid HTTPS link.");return;}
+            const items=venusRpcProfiles().filter(x=>x.id!==p.id);
+            items.unshift(p);
+            setSetting("rpcProfiles",JSON.stringify(items.slice(0,32)));
+            setSetting("rpcSelected",p.id);
+            edit(p);
+            setNotice("Profile saved on this device.");
+        };
+        const removeCurrent=()=>{
+            const items=venusRpcProfiles().filter(x=>x.id!==profile.id);
+            setSetting("rpcProfiles",JSON.stringify(items));
+            setSetting("rpcSelected","");
+            edit(venusRpcNormalize(VENUS_RPC_EMPTY));
+            setNotice("Saved profile removed.");
+        };
+        const image=(url,small)=>{
+            if (!venusRpcValidUrl(url)) return text(small?"?":"GAME",
+                {fontSize:small?14:12,fontWeight:"700",color:"#bcc3fd"});
+            return el(RN.Image,{source:{uri:url},resizeMode:"cover",
+                style:{height:small?28:64,width:small?28:64,borderRadius:small?14:12}});
+        };
+        const elapsed=profile.elapsed?venusRpcTime((Date.now()-started)/1000):null;
+        const preview=el(RN.View,{key:"preview",accessible:true,style:{borderRadius:16,
+            backgroundColor:"#20232b",borderWidth:1,borderColor:"#414651",padding:15,gap:10}},
+            text("PROFILE PREVIEW",{fontSize:11,color:muted,fontWeight:"700",letterSpacing:1}),
+            el(RN.View,{style:{flexDirection:"row",gap:12,alignItems:"center"}},
+                el(RN.View,{style:{width:68,height:68,justifyContent:"center",alignItems:"center",
+                    backgroundColor:"#343950",borderRadius:12}},image(profile.largeImage,false),
+                    profile.smallImage?el(RN.View,{style:{position:"absolute",right:-6,bottom:-5,
+                        borderWidth:2,borderColor:"#20232b",borderRadius:18}},image(profile.smallImage,true)):null),
+                el(RN.View,{style:{flex:1,gap:4}},
+                    text(profile.name || "Custom Activity",{fontWeight:"700",fontSize:16}),
+                    profile.details?text(profile.details,{fontSize:13}):null,
+                    profile.state?text(profile.state,{color:muted,fontSize:12}):null,
+                    elapsed?text(elapsed+" elapsed",{color:muted,fontSize:12}):null)),
+            profile.buttons.filter(b=>b.label&&venusRpcValidUrl(b.url)).map((b,i)=>
+                el(RN.View,{key:"previewbutton"+i,style:{backgroundColor:"#414651",
+                    borderRadius:8,paddingVertical:9,alignItems:"center"}},
+                    text(b.label,{fontSize:13,fontWeight:"600"}))),
+            text("Preview only. Not published to your Discord profile.",{fontSize:11,color:"#e7c88a"}));
+        const presets=el(RN.View,{key:"presets",style:{flexDirection:"row",flexWrap:"wrap",gap:7}},
+            VENUS_RPC_GAMES.map(game=>button(game[1],()=>choose(game[0],game[1]),
+                profile.id===game[0],game[0])),
+            button("Custom",()=>choose("custom","Custom Activity"),profile.id==="custom","custom"));
+        const saved=venusRpcProfiles();
+        const savedRows=saved.length?el(RN.View,{key:"saved",style:{gap:8}},
+            text("Saved profiles",{fontSize:15,fontWeight:"700"}),
+            el(RN.View,{style:{flexDirection:"row",flexWrap:"wrap",gap:7}},
+                saved.map(p=>button(p.name,()=>choose(p.id,p.name),p.id===profile.id,p.id+"saved")))):null;
+        const buttons=[0,1].map(i=>el(RN.View,{key:"custombutton"+i,style:{gap:6,marginVertical:4}},
+            text("Button "+(i+1),{fontSize:13,fontWeight:"700"}),
+            el(RN.TextInput,{accessibilityLabel:"Button "+(i+1)+" label",value:profile.buttons[i].label,
+                placeholder:"Button label",placeholderTextColor:muted,maxLength:32,
+                style:{color:fg,backgroundColor:"#171a21",padding:10,borderRadius:10},
+                onChangeText:value=>updateButton(i,"label",value)}),
+            el(RN.TextInput,{accessibilityLabel:"Button "+(i+1)+" URL",value:profile.buttons[i].url,
+                placeholder:"https://example.com",placeholderTextColor:muted,maxLength:512,
+                autoCapitalize:"none",autoCorrect:false,keyboardType:"url",
+                style:{color:fg,backgroundColor:"#171a21",padding:10,borderRadius:10},
+                onChangeText:value=>updateButton(i,"url",value)})));
+        const sections=[
+            el(RN.View,{key:"title",style:{gap:5}},text("Custom Rich Presence",{fontSize:20,fontWeight:"700"}),
+                text("Game presets, custom profiles and an instant Discord-style preview.",{color:muted})),
+            preview,
+            text("Presets",{fontSize:15,fontWeight:"700"}),presets,
+            savedRows,
+            text("Edit activity",{fontSize:15,fontWeight:"700"}),
+            field("Activity name","name","Minecraft"),
+            field("Details","details","Exploring the Overworld"),
+            field("State","state","In a world"),
+            field("Large image URL (HTTPS)","largeImage","https://example.com/image.png",256),
+            field("Large image hint","largeText","Cover art"),
+            field("Small image URL (HTTPS)","smallImage","https://example.com/icon.png",256),
+            field("Small image hint","smallText","Icon"),
+            el(RN.View,{key:"timer",style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingVertical:6}},
+                text("Elapsed-time counter"),
+                el(RN.Switch,{value:profile.elapsed,onValueChange:v=>{edit(p=>Object.assign({},p,{elapsed:v}));setStarted(Date.now());}})),
+            text("Optional links",{fontSize:15,fontWeight:"700"}),
+            ...buttons,
+            el(RN.View,{key:"actions",style:{flexDirection:"row",flexWrap:"wrap",gap:8}},
+                button("Save profile",saveCurrent,true),
+                button("Reset timer",()=>setStarted(Date.now()),false),
+                button("Delete saved",removeCurrent,false)),
+            notice?text(notice,{color:"#e7c88a"}):null,
+            text("Real publishing requires a verified Android RPC transport and a registered Discord application ID. No account token is collected or stored.",{color:muted,fontSize:12,lineHeight:18})
+        ];
+        return el(RN.ScrollView,{key:"venusRpcEditor",keyboardShouldPersistTaps:"handled",
+            contentContainerStyle:{padding:16,paddingBottom:40,gap:12}},...sections);
+    }
