@@ -62,3 +62,12 @@ for term in ["function settingsSections(", "VENUS_GENERAL", "VENUS_FEATURES", "V
         print("\nAT",i+1)
         for n in range(max(0,i-12),min(len(lines),i+26)):
             print(f"{n+1}: {lines[n][:500]}")
+
+print("\n====== APP DETECTOR BRIDGE INSPECTION ======")
+for term in ["venus-diag-v1:", "function diag", "function diagnose", "clearFolder(", "FileModule", "NativeModules", "getEnforcing", "readAsset("]:
+  hits=[i for i,l in enumerate(lines) if term in l]
+  print("TERM",term,"COUNT",len(hits))
+  for i in hits[:3]:
+    print("LINE",i+1)
+    for k in range(max(0,i-4),min(len(lines),i+15)):
+      print(f"{k+1}: {lines[k][:260]}")
