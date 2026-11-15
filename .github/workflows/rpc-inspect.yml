@@ -1,0 +1,14 @@
+name: Inspect RPC integration anchors
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find Venus navigation and settings anchors
+        run: python3 scripts/inspect_rpc_anchors.py
