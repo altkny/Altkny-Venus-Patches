@@ -1,12 +1,12 @@
 // Custom Rich Presence UI for the existing Venus bootstrap closure.
 // Experimental publisher uses Discord's own in-client activity dispatcher.
     const VENUS_RPC_GAMES = [
-        ["minecraft","Minecraft"], ["roblox","Roblox"], ["gtav","Grand Theft Auto V"],
-        ["valorant","VALORANT"], ["fortnite","Fortnite"], ["genshin","Genshin Impact"],
-        ["stardew","Stardew Valley"], ["terraria","Terraria"]
+        "Minecraft","ROBLOX","VALORANT","Fortnite","Terraria","Stardew Valley",
+        "Counter-Strike 2","League of Legends","Apex Legends","ELDEN RING",
+        "Overwatch","Dota 2"
     ];
     const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",applicationId:"",details:"",state:"",
-        largeImage:"",smallImage:"",largeText:"",smallText:"",
+        iconHash:"",largeImage:"",smallImage:"",largeText:"",smallText:"",
         elapsed:true,buttons:[{label:"",url:""},{label:"",url:""}]};
     function venusRpcClean(x,n) { return typeof x === "string" ? x.trim().slice(0,n || 128) : ""; }
     function venusRpcNormalize(value) {
@@ -15,6 +15,7 @@
         return {
             id:venusRpcClean(p.id,64) || "custom",
             applicationId:venusRpcClean(p.applicationId,20),
+            iconHash:venusRpcClean(p.iconHash,40),
             name:venusRpcClean(p.name) || "Custom Activity",
             details:venusRpcClean(p.details),state:venusRpcClean(p.state),
             largeImage:venusRpcClean(p.largeImage,256),smallImage:venusRpcClean(p.smallImage,256),
@@ -36,15 +37,41 @@
         return (h ? h+":" : "")+String(m).padStart(h?2:1,"0")+":"+String(s).padStart(2,"0");
     }
     function VenusRpcSettings() {
-        useSettings("rpcProfiles"); useSettings("rpcSelected"); useSettings("rpcEnabled");
+        useSettings("rpcProfiles"); useSettings("rpcSelected"); useSettings("rpcEnabled"); useSettings("rpcCatalog");
         const [profile,edit]=React.useState(()=>venusRpcNormalize(
             venusRpcProfiles().find(x=>x.id===settings.rpcSelected) ||
             Object.assign({},VENUS_RPC_EMPTY,{name:"Minecraft",id:"minecraft"})));
         const [started,setStarted]=React.useState(Date.now());
         const [tick,setTick]=React.useState(0);
         const [notice,setNotice]=React.useState("");
-        const [newId,setNewId]=React.useState("");
+        const [search,setSearch]=React.useState("");
+        const [visible,setVisible]=React.useState(36);
+        const [liveSync,setLiveSync]=React.useState(true);
         const rpcRunning=!!(settings.rpcEnabled && venusRpcTransport.active);
+        React.useEffect(()=>{
+            let active=true;
+            Promise.resolve().then(()=>venusRpcCatalogLoad(false)).catch(()=>{}).then(()=>{
+                if(active) setVisible(n=>Math.max(36,n));
+            });
+            return ()=>{active=false;};
+        },[]);
+        // On an active profile, debounce edits and update the real Discord activity
+        // without needing to tap Publish after every key stroke.
+        React.useEffect(()=>{
+            if(!liveSync || !rpcRunning || venusRpcTransport.profileId!==profile.id) return;
+            if(!global.setTimeout) return;
+            const handle=global.setTimeout(()=>{
+                if(!settings.rpcEnabled || venusRpcTransport.profileId!==profile.id) return;
+                const p=venusRpcNormalize(profile);
+                const result=venusRpcPublish(p,true);
+                if(result.ok){
+                    const saved=venusRpcProfiles().filter(x=>x.id!==p.id);
+                    saved.unshift(p);
+                    setSetting("rpcProfiles",JSON.stringify(saved.slice(0,32)));
+                }
+            },850);
+            return ()=>{if(global.clearTimeout) global.clearTimeout(handle);};
+        },[profile,liveSync,rpcRunning]);
         React.useEffect(()=>{
             if (!profile.elapsed) return;
             const timer=global.setInterval?global.setInterval(()=>setTick(t=>t+1),1000):null;
@@ -63,7 +90,8 @@
                         borderRadius:10,paddingHorizontal:12,paddingVertical:9,fontSize:14},
                     value,placeholder,placeholderTextColor:"#818792",
                     maxLength:limit||128,autoCorrect:false,
-                    onChangeText:v=>edit(p=>Object.assign({},p,{[key]:v}))}));
+                    onChangeText:v=>edit(p=>Object.assign({},p,{[key]:v},
+                        key==="applicationId" ? {iconHash:""} : {}))}));
         };
         const button=(label,press,selected,key)=>{
             return el(RN.Pressable,{key:key||label,accessibilityRole:"button",onPress:press,
@@ -71,10 +99,17 @@
                     borderWidth:1,borderColor:selected?accent:line,backgroundColor:selected?"#5865f23a":panel}},
                 text(label,{fontWeight:"600",color:selected?"#c5caff":fg,fontSize:13}));
         };
-        const choose=(id,name)=>{
-            const saved=venusRpcProfiles().find(x=>x.id===id);
-            edit(saved || venusRpcNormalize(Object.assign({},VENUS_RPC_EMPTY,{id,name})));
-            setNewId("");setStarted(Date.now());setNotice("");
+        const choose=(game)=>{
+            const saved=venusRpcProfiles().find(x=>x.id===game.id || x.applicationId===game.id);
+            const p=saved || venusRpcNormalize(Object.assign({},VENUS_RPC_EMPTY,{
+                id:game.id,applicationId:game.id,name:game.name,iconHash:game.icon||""
+            }));
+            edit(p);setStarted(Date.now());setNotice("");
+        };
+        const custom=()=>{
+            const saved=venusRpcProfiles().find(x=>x.id==="custom");
+            edit(saved || venusRpcNormalize(VENUS_RPC_EMPTY));
+            setStarted(Date.now());setNotice("");
         };
         const updateButton=(index,key,value)=>edit(p=>{
             const buttons=p.buttons.map(x=>Object.assign({},x));
@@ -105,7 +140,7 @@
             backgroundSync();
             edit(p);
             setStarted(venusRpcTransport.startedAt);
-            setNotice("Activity sent to Discord's local dispatcher. External visibility is not yet verified.");
+            setNotice("Activity updated in Discord.");
         };
         const stopCurrent=()=>{
             setSetting("rpcEnabled",false);
@@ -120,21 +155,35 @@
             edit(venusRpcNormalize(VENUS_RPC_EMPTY));
             setNotice("Saved profile removed.");
         };
-        const image=(url,small)=>{
-            if (!venusRpcValidUrl(url)) return text(small?"?":"GAME",
-                {fontSize:small?14:12,fontWeight:"700",color:"#bcc3fd"});
-            return el(RN.Image,{source:{uri:url},resizeMode:"cover",
-                style:{height:small?28:64,width:small?28:64,borderRadius:small?14:12}});
-        };
+        function RpcCover(props) {
+            const [failed,setFailed]=React.useState(false);
+            React.useEffect(()=>{setFailed(false);},[props.uri]);
+            const size=props.size||64;
+            const tile={height:size,width:size,borderRadius:props.circle?size/2:12,
+                backgroundColor:"#363d50",alignItems:"center",justifyContent:"center",overflow:"hidden"};
+            return el(RN.View,{style:tile},
+                props.uri&&!failed ? el(RN.Image,{
+                    source:{uri:props.uri},resizeMode:"cover",
+                    onError:()=>setFailed(true),
+                    style:{width:size,height:size,borderRadius:tile.borderRadius}}):
+                    text(props.label||"GAME",{fontSize:size<40?10:12,color:"#d1d8ff",fontWeight:"700"}));
+        }
+        const image=(p,small,size)=>el(RpcCover,{
+            key:(small?"small:":"cover:")+(venusRpcPreviewImage(p,small)||"none"),
+            uri:venusRpcPreviewImage(p,small),size:size||64,circle:!!small,
+            label:small?"?":(p.name||"GAME").slice(0,2).toUpperCase()
+        });
         const elapsed=profile.elapsed?venusRpcTime((Date.now()-(rpcRunning && venusRpcTransport.profileId===profile.id ? venusRpcTransport.startedAt : started))/1000):null;
         const preview=el(RN.View,{key:"preview",accessible:true,style:{borderRadius:16,
             backgroundColor:"#20232b",borderWidth:1,borderColor:"#414651",padding:15,gap:10}},
-            text("PROFILE PREVIEW",{fontSize:11,color:muted,fontWeight:"700",letterSpacing:1}),
+            el(RN.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}},
+                text("PLAYING A GAME",{fontSize:11,color:muted,fontWeight:"700",letterSpacing:1}),
+                text("LIVE PREVIEW",{fontSize:10,color:"#a8b0ff",fontWeight:"700"})),
             el(RN.View,{style:{flexDirection:"row",gap:12,alignItems:"center"}},
-                el(RN.View,{style:{width:68,height:68,justifyContent:"center",alignItems:"center",
-                    backgroundColor:"#343950",borderRadius:12}},image(profile.largeImage,false),
+                el(RN.View,{style:{width:72,height:72,justifyContent:"center",alignItems:"center",
+                    backgroundColor:"#343950",borderRadius:12}},image(profile,false,72),
                     profile.smallImage?el(RN.View,{style:{position:"absolute",right:-6,bottom:-5,
-                        borderWidth:2,borderColor:"#20232b",borderRadius:18}},image(profile.smallImage,true)):null),
+                        borderWidth:2,borderColor:"#20232b",borderRadius:18}},image(profile,true,30)):null),
                 el(RN.View,{style:{flex:1,gap:4}},
                     text(profile.name || "Custom Activity",{fontWeight:"700",fontSize:16}),
                     profile.details?text(profile.details,{fontSize:13}):null,
@@ -145,13 +194,62 @@
                     borderRadius:8,paddingVertical:9,alignItems:"center"}},
                     text(b.label,{fontSize:13,fontWeight:"600"}))),
             text(rpcRunning && venusRpcTransport.profileId===profile.id ?
-                "Sent to local Discord activity dispatcher. Check another account to verify." :
-                "Preview only. This profile is not currently active.",
-                {fontSize:11,color:"#e7c88a"}));
-        const presets=el(RN.View,{key:"presets",style:{flexDirection:"row",flexWrap:"wrap",gap:7}},
-            VENUS_RPC_GAMES.map(game=>button(game[1],()=>choose(game[0],game[1]),
-                profile.id===game[0],game[0])),
-            button("Custom",()=>choose("custom","Custom Activity"),profile.id==="custom","custom"));
+                (liveSync?"Active on Discord · edits sync automatically":"Active on Discord · tap Publish to update") :
+                "Preview mode · select a game and publish to start.",
+                {fontSize:11,color:rpcRunning?"#86d6b2":"#e7c88a"}));
+        const catalog=venusRpcKnownGames();
+        const featured=VENUS_RPC_GAMES.map(name=>catalog.find(g=>g.name.toLowerCase()===name.toLowerCase())).filter(Boolean);
+        const query=search.trim().toLowerCase();
+        const matches=React.useMemo(()=>{
+            if(!query) return catalog.slice(0,visible);
+            const found=[];
+            for(const game of catalog){
+                if(game.name.toLowerCase().includes(query)||game.id.includes(query)){
+                    found.push(game);
+                    if(found.length>=visible+1) break;
+                }
+            }
+            return found;
+        },[catalog,query,visible]);
+        const gamesToShow=matches.slice(0,visible);
+        const gameRow=(game)=>el(RN.Pressable,{key:game.id,accessibilityRole:"button",
+            accessibilityLabel:game.name,onPress:()=>choose(game),
+            style:{flexDirection:"row",alignItems:"center",gap:10,padding:10,
+                marginBottom:5,borderRadius:12,borderWidth:1,
+                borderColor:profile.applicationId===game.id?"#8790fb":"#383c47",
+                backgroundColor:profile.applicationId===game.id?"#5865f22e":"#272a33"}},
+            image({applicationId:game.id,iconHash:game.icon,name:game.name},false,36),
+            el(RN.View,{style:{flex:1,gap:2}},
+                text(game.name,{fontSize:13,fontWeight:"600"}),
+                text(game.id,{fontSize:10,color:muted})),
+            profile.applicationId===game.id?text("✓",{fontSize:16,color:"#a9b3ff"}):null);
+        const featuredRows=el(RN.View,{key:"featured",style:{gap:6}},
+            text("Popular games",{fontSize:15,fontWeight:"700"}),
+            el(RN.View,{style:{gap:2}},featured.map(gameRow)));
+        const presets=el(RN.View,{key:"gameCatalog",style:{gap:9}},
+            featuredRows,
+            text("Discord game library",{fontSize:15,fontWeight:"700"}),
+            el(RN.TextInput,{
+                accessibilityLabel:"Search Discord games",
+                placeholder:"Search thousands of games by name or ID...",
+                placeholderTextColor:"#858b9e",value:search,
+                autoCapitalize:"none",autoCorrect:false,
+                onChangeText:value=>{setSearch(value);setVisible(36);},
+                style:{color:fg,backgroundColor:"#171a21",borderColor:line,borderWidth:1,
+                    borderRadius:12,paddingHorizontal:13,paddingVertical:11,fontSize:14}}),
+            text((venusRpcCatalog.source==="discord"?"Official Discord directory: ":
+                venusRpcCatalog.loading?"Loading Discord games · ":
+                "Offline fallback: ")+catalog.length+" games",
+                {color:muted,fontSize:12}),
+            venusRpcCatalog.error?text("Catalog: "+venusRpcCatalog.error,{color:"#e6bb8d",fontSize:12}):null,
+            el(RN.View,{style:{gap:2}},gamesToShow.map(gameRow)),
+            matches.length>visible?button("Load more games",()=>setVisible(n=>Math.min(n+48,300)),false,"moreGames"):null,
+            button("Refresh official game list",()=>{
+                setNotice("Updating game catalog...");
+                venusRpcCatalogLoad(true).then(g=>setNotice("Game catalog updated: "+g.length+" games."))
+                    .catch(()=>setNotice("Game catalog is unavailable."));
+            },false,"refreshGames"),
+            button("Custom activity",custom,profile.id==="custom","custom"));
         const saved=venusRpcProfiles();
         const savedRows=saved.length?el(RN.View,{key:"saved",style:{gap:8}},
             text("Saved profiles",{fontSize:15,fontWeight:"700"}),
@@ -172,7 +270,7 @@
             el(RN.View,{key:"title",style:{gap:5}},text("Custom Rich Presence",{fontSize:20,fontWeight:"700"}),
                 text("Game presets, custom profiles and an instant Discord-style preview.",{color:muted})),
             preview,
-            text("Presets",{fontSize:15,fontWeight:"700"}),presets,
+            text("Choose a game",{fontSize:16,fontWeight:"700"}),presets,
             savedRows,
             text("Edit activity",{fontSize:15,fontWeight:"700"}),
             field("Activity name","name","Minecraft"),
@@ -186,6 +284,9 @@
             el(RN.View,{key:"timer",style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingVertical:6}},
                 text("Elapsed-time counter"),
                 el(RN.Switch,{value:profile.elapsed,onValueChange:v=>{edit(p=>Object.assign({},p,{elapsed:v}));setStarted(Date.now());}})),
+            el(RN.View,{key:"liveSync",style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingVertical:6}},
+                text("Auto-sync changes while active"),
+                el(RN.Switch,{value:liveSync,onValueChange:setLiveSync})),
             text("Optional links",{fontSize:15,fontWeight:"700"}),
             ...buttons,
             el(RN.View,{key:"actions",style:{flexDirection:"row",flexWrap:"wrap",gap:8}},
