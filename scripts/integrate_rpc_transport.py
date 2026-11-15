@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Integrate the experimental in-client RPC transport into Venus.
+
+This never reads tokens, creates a new Gateway connection, or promises that
+Discord will expose the activity to other accounts. Reversible and idempotent.
+"""
+from pathlib import Path
+
+root=Path(__file__).resolve().parents[1]
+runtime=root/"patches/src/main/resources/venus/bootstrap.js"
+ui=root/"patches/src/main/resources/venus/rpc_editor.js"
+transport=root/"patches/src/main/resources/venus/rpc_transport.js"
+s=runtime.read_text(encoding="utf-8")
+
+def replace_once(old,new):
+    global s
+    n=s.count(old)
+    if n != 1:
+        raise RuntimeError(f"Expected 1 occurrence, got {n}: {old[:100]!r}")
+    s=s.replace(old,new)
+
+if 'function VenusRpcSettings()' not in s:
+    raise RuntimeError("Run integrate_custom_rpc.py before this script")
+
+# Replace only the editor's own source region. Allows edits to the standalone
+# source to be carried forward without rebundling or modifying unrelated code.
+begin='    const VENUS_RPC_GAMES = ['
+end='    // Settings page: the Quest types, a status card and what to know.'
+if s.count(begin)!=1 or s.count(end)!=1:
+    raise RuntimeError("RPC editor/Quest settings anchors changed")
+a=s.index(begin)
+b=s.index(end,a)
+original=s[a:b]
+new=ui.read_text(encoding="utf-8")
+new=new[new.index(begin):].rstrip()+"\n"
+if original != new:
+    s=s[:a]+new+s[b:]
+
+if 'const VENUS_RPC_SOCKET = "venus-custom-rpc";' not in s:
+    # Transport is loaded before the editor; both share the bootstrap closure.
+    replace_once(begin,transport.read_text(encoding="utf-8").rstrip()+"\n"+begin)
+
+for old,new in [
+ ('customRpc:true, rpcProfiles:', 'customRpc:true, rpcEnabled:false, rpcProfiles:'),
+ ('customRpc: true, rpcProfiles:', 'customRpc: true, rpcEnabled: false, rpcProfiles:'),
+]:
+    if old in s and new not in s:
+        replace_once(old,new)
+if 'if (features.customRpc) selectModules([584]);' not in s:
+    replace_once('    if (features.badges) selectModules([584, 1392, 6015, 8590, 10002, 14713, 14748]);',
+        '    if (features.badges) selectModules([584, 1392, 6015, 8590, 10002, 14713, 14748]);\n'
+        '    if (features.customRpc) selectModules([584]);')
+if 'if (features.customRpc) venusRpcLoaded();' not in s:
+    replace_once('            status.storage = "ready";\n            debugLogReady();',
+        '            status.storage = "ready";\n            debugLogReady();\n'
+        '            if (features.customRpc) venusRpcLoaded();')
+if 'if (features.customRpc && exports && exports.default) venusRpcAttach(exports.default);' not in s:
+    replace_once('                if (features.badges && exports && exports.default) badgesInit(exports.default);',
+        '                if (features.badges && exports && exports.default) badgesInit(exports.default);\n'
+        '                if (features.customRpc && exports && exports.default) venusRpcAttach(exports.default);')
+if 'const rpcBusy = !!(features.customRpc && settings.rpcEnabled && venusRpcTransport.active);' not in s:
+    replace_once('        const needed = questBusy || badgeBusy || pushListening;',
+        '        const rpcBusy = !!(features.customRpc && settings.rpcEnabled && venusRpcTransport.active);\n'
+        '        const needed = questBusy || badgeBusy || rpcBusy || pushListening;')
+if 'rpcBusy ? tr("Sharing {name}"' not in s:
+    replace_once('            badgeBusy ? tr("Completing badges") : tr("Activity notifications");',
+        '            badgeBusy ? tr("Completing badges") :\n'
+        '            rpcBusy ? tr("Sharing {name}",{name:venusRpcSavedProfile()?.name || "activity"}) :\n'
+        '            tr("Activity notifications");')
+
+runtime.write_text(s,encoding="utf-8")
+print("Integrated token-free RPC sender, publish controls, restore and foreground service.")
