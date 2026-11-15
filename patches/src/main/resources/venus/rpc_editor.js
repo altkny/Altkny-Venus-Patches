@@ -56,7 +56,9 @@
         return VENUS_RPC_APPS.map(([name,category,type,details,state])=>({
             id:"app:"+name.toLowerCase().replace(/[^a-z0-9]+/g,"-"),
             name,category,type,details,state,source:"preset",applicationId:"",
-            sendMode:"kizzy",elapsed:type===0
+            packageName:typeof VENUS_RPC_KNOWN_PACKAGES!=="undefined"?
+                VENUS_RPC_KNOWN_PACKAGES[name]||"":"",
+            autoDetect:false,sendMode:"kizzy",elapsed:type===0
         }));
     }
     function venusRpcIsAppPreset(p) {
@@ -70,7 +72,8 @@
         [0,"Playing"],[2,"Listening"],[3,"Watching"],[1,"Streaming"],[5,"Competing"]
     ];
     const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",applicationId:"",details:"",state:"",
-        iconHash:"",iconUrl:"",category:"Custom",largeImage:"",smallImage:"",largeText:"",smallText:"",
+        iconHash:"",iconUrl:"",category:"Custom",packageName:"",autoDetect:false,
+        largeImage:"",smallImage:"",largeText:"",smallText:"",
         type:0,streamUrl:"",platform:"",partyCurrent:0,partyMax:0,
         sendMode:"rich",timeOffsetSeconds:0,
         elapsed:true,buttons:[{label:"",url:""},{label:"",url:""}]};
@@ -85,6 +88,9 @@
             iconUrl:venusRpcValidUrl(venusRpcClean(p.iconUrl,512))?
                 venusRpcClean(p.iconUrl,512):"",
             category:venusRpcClean(p.category,32)||"Custom",
+            packageName:/^[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+$/.test(
+                venusRpcClean(p.packageName,128))?venusRpcClean(p.packageName,128):"",
+            autoDetect:p.autoDetect===true,
             name:venusRpcClean(p.name) || "Custom Activity",
             details:venusRpcClean(p.details),state:venusRpcClean(p.state),
             largeImage:venusRpcClean(p.largeImage,256),smallImage:venusRpcClean(p.smallImage,256),
@@ -196,6 +202,8 @@
         const [gatewayToken,setGatewayToken]=React.useState("");
         const [gatewayConsent,setGatewayConsent]=React.useState(false);
         useSettings("rpcGateway");
+        useSettings("rpcDetection");
+        useSettings("rpcDetectionEnabled");
         const [tab,setTab]=React.useState("games");
         const [manualTime,setManualTime]=React.useState(()=>
             venusRpcTime(venusRpcNormalize(venusRpcProfiles().find(x=>x.id===settings.rpcSelected)||
@@ -339,6 +347,8 @@
             publishProfile(p);
         };
         const stopCurrent=()=>{
+            setSetting("rpcDetectionEnabled",false);
+            venusRpcDetectionStop(true);
             setSetting("rpcEnabled",false);
             venusRpcClear();
             setNotice("Activity stopped.");
