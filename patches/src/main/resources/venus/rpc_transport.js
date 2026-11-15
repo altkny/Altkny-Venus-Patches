@@ -276,6 +276,8 @@
         if(!features.customRpc) return;
         // The dispatcher may not be initialized when settings are loaded.
         later(venusRpcRestore,2500,false);
+        if(typeof venusRpcDetectionStart==="function")
+            later(venusRpcDetectionStart,3400,false);
     }
     function venusRpcAttach(dispatcher) {
         if(venusRpcTransport.attached || !dispatcher || typeof dispatcher.subscribe!=="function") return;
@@ -290,9 +292,17 @@
             later(venusRpcRestore,1500,false);
         });
         dispatcher.subscribe("LOGOUT",()=>{
+            if(typeof venusRpcDetectionStop==="function") {
+                setSetting("rpcDetectionEnabled",false);
+                venusRpcDetectionStop(true);
+            }
             venusRpcClear();venusRpcTransport.connected=false;venusRpcTransport.account=null;
         });
         dispatcher.subscribe("MULTI_ACCOUNT_SWITCH_START",()=>{
+            if(typeof venusRpcDetectionStop==="function") {
+                setSetting("rpcDetectionEnabled",false);
+                venusRpcDetectionStop(true);
+            }
             venusRpcClear();venusRpcTransport.connected=false;venusRpcTransport.account=null;
         });
         if(currentId()) later(venusRpcRestore,1200,false);
