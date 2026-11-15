@@ -5,7 +5,7 @@
     const VENUS_RPC_PID = 20941;
     const venusRpcTransport = {attached:false, connected:false, active:false,
         startedAt:0, profileId:null, error:"", lastSent:0, account:null,
-        lastPayload:null};
+        lastPayload:null, timeOffset:0};
     // Discord's own detectable games directory, loaded on demand only.
     // A search result always carries its real Discord application ID and icon hash.
     const venusRpcCatalog = {games:null,loading:null,at:0,error:"",source:"fallback"};
@@ -97,12 +97,22 @@
     }
     function venusRpcBuildActivity(profile, startedAt) {
         const p=venusRpcNormalize(profile), app=venusRpcAppId(p);
-        if (!app) return {error:"No registered Discord Application ID for this profile."};
+        if (!app && p.sendMode!=="compat") return {error:"This game needs an Application ID. Try Compatibility mode."};
         if (!p.name) return {error:"An activity name is required."};
         const buttons=p.buttons.filter(b=>b.label&&venusRpcValidUrl(b.url)).slice(0,2);
         if (p.buttons.some(b=>(b.label||b.url)&&(!b.label||!venusRpcValidUrl(b.url))))
             return {error:"Each button needs a name and a valid HTTPS URL."};
-        const activity={name:p.name,application_id:app,type:0,flags:0};
+        // Both modes use the already-authenticated local client dispatcher.
+        // Compatibility sends a simplified game presence without an app ID.
+        // It is not a Kizzy/Gateway connection and may still be filtered.
+        const mode=p.sendMode==="compat"?"compat":"rich";
+        const kind=[0,1,2,3,5].includes(p.type)?p.type:0;
+        const activity={name:p.name,type:kind,flags:0};
+        if(mode==="rich") activity.application_id=app;
+        if(kind===1&&p.streamUrl){
+            if(!venusRpcValidUrl(p.streamUrl)) return {error:"Streaming URL must be HTTPS."};
+            activity.url=p.streamUrl;
+        }
         if(p.details) activity.details=p.details;
         if(p.state) activity.state=p.state;
         if(p.elapsed) activity.timestamps={start:startedAt};
@@ -113,7 +123,7 @@
         if(p.smallImage) assets.small_image=p.smallImage;
         if(p.largeText) assets.large_text=p.largeText;
         if(p.smallText) assets.small_text=p.smallText;
-        if(Object.keys(assets).length) activity.assets=assets;
+        if(Object.keys(assets).length&&mode==="rich") activity.assets=assets;
         if(buttons.length) {
             activity.buttons=buttons.map(b=>b.label);
             activity.metadata={button_urls:buttons.map(b=>b.url)};
@@ -134,6 +144,7 @@
         venusRpcTransport.profileId=null;
         venusRpcTransport.startedAt=0;
         venusRpcTransport.lastPayload=null;
+        venusRpcTransport.timeOffset=0;
         if(was) venusRpcDispatch(null);
         // An explicit stop clears the stored epoch. Logout/account switches
         // retain it for the same account, but never publish it to another.
@@ -150,8 +161,12 @@
         if(resumed&&settings.rpcAccountId&&settings.rpcAccountId!==currentId())
             return {ok:false,error:"This RPC timer belongs to another Discord account."};
         const p=venusRpcNormalize(profile);
-        const start=resumed ?
-            (venusRpcTransport.startedAt||venusRpcStoredStart()||Date.now()) : Date.now();
+        const offset=Math.max(0,Math.min(7*86400,Math.floor(Number(p.timeOffsetSeconds)||0)));
+        const sameProfile=venusRpcTransport.active&&venusRpcTransport.profileId===p.id;
+        const changedOffset=sameProfile&&venusRpcTransport.timeOffset!==offset;
+        // Only explicit offset edits modify the epoch. Routine updates keep it.
+        const start=!resumed||changedOffset?Date.now()-offset*1000:
+            (venusRpcTransport.startedAt||venusRpcStoredStart()||Date.now()-offset*1000);
         const built=venusRpcBuildActivity(p,start);
         if(built.error) {
             venusRpcTransport.error=built.error;
@@ -179,8 +194,9 @@
         venusRpcTransport.account=currentId();
         venusRpcTransport.lastSent=Date.now();
         venusRpcTransport.lastPayload=payload;
+        venusRpcTransport.timeOffset=offset;
         venusRpcTransport.error="";
-        if(!resumed || !venusRpcStoredStart()){
+        if(!resumed || changedOffset || !venusRpcStoredStart()){
             setSetting("rpcStartedAt",start);
             setSetting("rpcAccountId",currentId());
         }
