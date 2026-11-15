@@ -33,6 +33,7 @@ jobs:
           node --check patches/src/main/resources/venus/rpc_gateway.js
           node --check patches/src/main/resources/venus/rpc_editor.js
           node tests/rpc_gateway.cjs
+          node tests/rpc_app_catalog.cjs
           node tests/rpc_transport.cjs
           node tests/rpc_timer.cjs
           node tests/rpc_navigation.cjs
