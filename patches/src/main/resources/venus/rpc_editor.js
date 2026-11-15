@@ -5,8 +5,12 @@
         "Counter-Strike 2","League of Legends","Apex Legends","ELDEN RING",
         "Overwatch","Dota 2"
     ];
+    const VENUS_RPC_TYPES = [
+        [0,"Playing"],[2,"Listening"],[3,"Watching"],[1,"Streaming"],[5,"Competing"]
+    ];
     const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",applicationId:"",details:"",state:"",
         iconHash:"",largeImage:"",smallImage:"",largeText:"",smallText:"",
+        type:0,streamUrl:"",sendMode:"rich",timeOffsetSeconds:0,
         elapsed:true,buttons:[{label:"",url:""},{label:"",url:""}]};
     function venusRpcClean(x,n) { return typeof x === "string" ? x.trim().slice(0,n || 128) : ""; }
     function venusRpcNormalize(value) {
@@ -20,6 +24,10 @@
             details:venusRpcClean(p.details),state:venusRpcClean(p.state),
             largeImage:venusRpcClean(p.largeImage,256),smallImage:venusRpcClean(p.smallImage,256),
             largeText:venusRpcClean(p.largeText),smallText:venusRpcClean(p.smallText),
+            type:[0,1,2,3,5].includes(Number(p.type))?Number(p.type):0,
+            streamUrl:venusRpcClean(p.streamUrl,512),
+            sendMode:p.sendMode==="compat"?"compat":"rich",
+            timeOffsetSeconds:Math.max(0,Math.min(7*86400,Math.floor(Number(p.timeOffsetSeconds)||0))),
             elapsed:p.elapsed === true,
             buttons:[0,1].map(i=>({label:venusRpcClean(buttons[i] && buttons[i].label,32),
                 url:venusRpcClean(buttons[i] && buttons[i].url,512)}))
@@ -92,6 +100,15 @@
             }):el(RN.Text,{style:{fontSize:size<40?10:12,color:"#d1d8ff",fontWeight:"700"}},
                 props.label||"GAME"));
     }
+    function venusRpcParseTime(value) {
+        const x=String(value||"").trim();
+        if(!/^(?:\d{1,3}:)?\d{1,2}:\d{1,2}$/.test(x)) return null;
+        const parts=x.split(":").map(Number);
+        const h=parts.length===3?parts[0]:0,m=parts.length===3?parts[1]:parts[0],s=parts[parts.length-1];
+        if(m>59||s>59) return null;
+        const n=h*3600+m*60+s;
+        return n<=7*86400?n:null;
+    }
     function VenusRpcSettings() {
         useSettings("rpcProfiles"); useSettings("rpcSelected"); useSettings("rpcEnabled"); useSettings("rpcCatalog");
         const [profile,edit]=React.useState(()=>venusRpcNormalize(
@@ -102,6 +119,10 @@
         const [search,setSearch]=React.useState("");
         const [visible,setVisible]=React.useState(12);
         const [liveSync,setLiveSync]=React.useState(true);
+        const [tab,setTab]=React.useState("games");
+        const [manualTime,setManualTime]=React.useState(()=>
+            venusRpcTime(venusRpcNormalize(venusRpcProfiles().find(x=>x.id===settings.rpcSelected)||
+                VENUS_RPC_EMPTY).timeOffsetSeconds));
         const rpcRunning=!!(settings.rpcEnabled && venusRpcTransport.active);
         React.useEffect(()=>{
             let active=true;
@@ -154,12 +175,18 @@
             const p=saved || venusRpcNormalize(Object.assign({},VENUS_RPC_EMPTY,{
                 id:game.id,applicationId:game.id,name:game.name,iconHash:game.icon||""
             }));
-            edit(p);setStarted(Date.now());setNotice("");
+            edit(p);
+            setManualTime(venusRpcTime(p.timeOffsetSeconds));
+            setStarted(Date.now()-p.timeOffsetSeconds*1000);
+            setNotice("");
         };
         const custom=()=>{
             const saved=venusRpcProfiles().find(x=>x.id==="custom");
-            edit(saved || venusRpcNormalize(VENUS_RPC_EMPTY));
-            setStarted(Date.now());setNotice("");
+            const p=saved||venusRpcNormalize(VENUS_RPC_EMPTY);
+            edit(p);
+            setManualTime(venusRpcTime(p.timeOffsetSeconds));
+            setStarted(Date.now()-p.timeOffsetSeconds*1000);
+            setTab("editor");setNotice("");
         };
         const updateButton=(index,key,value)=>edit(p=>{
             const buttons=p.buttons.map(x=>Object.assign({},x));
@@ -190,7 +217,7 @@
             backgroundSync();
             edit(p);
             setStarted(venusRpcTransport.startedAt);
-            setNotice("Activity updated in Discord.");
+            setNotice("Activity dispatched. Another Discord client must confirm its public visibility.");
         };
         const stopCurrent=()=>{
             setSetting("rpcEnabled",false);
@@ -206,8 +233,10 @@
             setNotice("Saved profile removed.");
         };
         const resetTimer=()=>{
+            const p=venusRpcNormalize(Object.assign({},profile,{timeOffsetSeconds:0}));
+            edit(p);setManualTime("00:00:00");
             if(rpcRunning&&venusRpcTransport.profileId===profile.id){
-                const result=venusRpcPublish(profile,false);
+                const result=venusRpcPublish(p,false);
                 if(!result.ok){setNotice(result.error);return;}
                 setStarted(venusRpcTransport.startedAt);
                 setNotice("Timer restarted in Discord and in the preview.");
@@ -216,6 +245,31 @@
                 setNotice("Preview timer restarted.");
             }
         };
+        const applyManualTime=()=>{
+            const seconds=venusRpcParseTime(manualTime);
+            if(seconds===null){setNotice("Use HH:MM:SS, up to 168 hours.");return;}
+            edit(p=>Object.assign({},p,{timeOffsetSeconds:seconds}));
+            setStarted(Date.now()-seconds*1000);
+            setNotice("Elapsed time adjusted. Publish to apply it to your activity.");
+        };
+        const typePicker=el(RN.View,{key:"typePicker",style:{gap:8}},
+            text("Activity style",{fontSize:14,fontWeight:"700"}),
+            el(RN.View,{style:{flexDirection:"row",flexWrap:"wrap",gap:7}},
+                VENUS_RPC_TYPES.map(([kind,label])=>
+                    button(label,()=>edit(p=>Object.assign({},p,{type:kind})),
+                        profile.type===kind,"kind:"+kind))));
+        const deliveryPicker=el(RN.View,{key:"delivery",style:{gap:9}},
+            text("Publication format",{fontSize:15,fontWeight:"700"}),
+            button("Full Rich Presence · Application ID",()=>
+                edit(p=>Object.assign({},p,{sendMode:"rich"})),
+                profile.sendMode!=="compat","rich"),
+            button("Compatibility · Name-only game",()=>
+                edit(p=>Object.assign({},p,{sendMode:"compat"})),
+                profile.sendMode==="compat","compat"),
+            text("Both use the local Discord client. Compatibility removes the Application ID and custom assets. It may help with unsupported game IDs, but visibility is not guaranteed.",
+                {color:muted,fontSize:12,lineHeight:18}),
+            text("Kizzy-style Gateway authentication is not included: the Venus patch will not extract or request your Discord account token.",
+                {color:muted,fontSize:12,lineHeight:18}));
         const image=(p,small,size)=>el(VenusRpcCover,{
             key:(small?"small:":"cover:")+(venusRpcPreviewImage(p,small)||"none"),
             uri:venusRpcPreviewImage(p,small),size:size||64,circle:!!small,
@@ -226,7 +280,9 @@
         const preview=el(RN.View,{key:"preview",accessible:true,style:{borderRadius:16,
             backgroundColor:"#20232b",borderWidth:1,borderColor:"#414651",padding:15,gap:10}},
             el(RN.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}},
-                text("PLAYING A GAME",{fontSize:11,color:muted,fontWeight:"700",letterSpacing:1}),
+                text((VENUS_RPC_TYPES.find(row=>row[0]===profile.type)||VENUS_RPC_TYPES[0])[1].toUpperCase()+
+                    " · "+(profile.sendMode==="compat"?"COMPATIBILITY":"RICH PRESENCE"),
+                    {fontSize:10,color:muted,fontWeight:"700",letterSpacing:0.5}),
                 text("LIVE PREVIEW",{fontSize:10,color:"#a8b0ff",fontWeight:"700"})),
             el(RN.View,{style:{flexDirection:"row",gap:12,alignItems:"center"}},
                 el(RN.View,{style:{width:72,height:72,justifyContent:"center",alignItems:"center",
