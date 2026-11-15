@@ -1,6 +1,6 @@
-// Experimental in-client activity transport. Reuses Discord's signed-in
-// dispatcher; never opens a second Gateway session or reads/stores user tokens.
-// A successful dispatch is NOT proof of visibility to other accounts.
+// Activity payload builder and local dispatcher.
+ // Optional independent Gateway sender lives in rpc_gateway.js.
+ // Successful dispatch is NOT proof of visibility to other accounts.
     const VENUS_RPC_SOCKET = "venus-custom-rpc";
     const VENUS_RPC_PID = 20941;
     const venusRpcTransport = {attached:false, connected:false, active:false,
@@ -38,8 +38,11 @@
         const app=String(p&&p.applicationId||"");
         const name=String(p&&p.name||"").toLowerCase();
         const games=venusRpcKnownGames();
+        // An app template is not a game even if its name matches a directory entry.
+        const appCategory=p&&p.category;
+        const isGame=(!appCategory||appCategory==="Game"||appCategory==="Custom");
         return games.find(g=>g.id===app)||
-            (!app&&games.find(g=>g.name.toLowerCase()===name))||null;
+            (!app&&isGame&&games.find(g=>g.name.toLowerCase()===name))||null;
     }
     function venusRpcCatalogLoad(force) {
         if(!force&&venusRpcCatalog.games&&Date.now()-venusRpcCatalog.at<6*3600000)
@@ -85,6 +88,7 @@
         if(/^\d{17,20}$/.test(String(candidate||""))&&app)
             return "https://cdn.discordapp.com/app-assets/"+app+"/"+candidate+".png?size=256";
         if(!small){
+            if(venusRpcValidUrl(p.iconUrl)) return p.iconUrl;
             const known=venusRpcGameForProfile(p);
             return venusRpcOfficialIcon(app,p.iconHash||(known&&known.icon),256);
         }
@@ -115,9 +119,8 @@
         const buttons=p.buttons.filter(b=>b.label&&venusRpcValidUrl(b.url)).slice(0,2);
         if (p.buttons.some(b=>(b.label||b.url)&&(!b.label||!venusRpcValidUrl(b.url))))
             return {error:"Each button needs a name and a valid HTTPS URL."};
-        // Both modes use the already-authenticated local client dispatcher.
-        // Compatibility sends a simplified game presence without an app ID.
-        // It is not a Kizzy/Gateway connection and may still be filtered.
+        // Rich and Compatibility use the local dispatcher. Gateway is separate.
+        // No app template can claim an official Application ID it does not own.
         const mode=p.sendMode==="compat"?"compat":p.sendMode==="kizzy"?"kizzy":"rich";
         const kind=[0,1,2,3,5].includes(p.type)?p.type:0;
         const activity={name:p.name,type:kind,flags:0};
@@ -130,6 +133,10 @@
         if(p.details) activity.details=p.details;
         if(p.state) activity.state=p.state;
         if(p.elapsed) activity.timestamps={start:startedAt};
+        // Optional native activity fields used by official game presences.
+        if(p.platform) activity.platform=p.platform;
+        if(p.partyMax>0&&p.partyCurrent>0&&p.partyCurrent<=p.partyMax)
+            activity.party={size:[p.partyCurrent,p.partyMax]};
         // Discord may drop unsupported CDN/remote asset keys; the preview is
         // intentionally independent and never claims that assets were accepted.
         const assets={};
