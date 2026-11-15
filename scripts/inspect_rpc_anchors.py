@@ -29,3 +29,8 @@ for a,b in [(92,125),(1200,1255),(1540,1695),(1760,1870)]:
  print(f"\\n### FOCUSED RANGE {a}-{b} ###")
  for n in range(a-1,min(len(lines),b)):
   print(f"{n+1}: {lines[n][:210]}")
+
+for a,b in [(1690,1760),(1840,1880)]:
+ print(f"\\n### FOCUSED RANGE {a}-{b} ###")
+ for n in range(a-1,min(len(lines),b)):
+  print(f"{n+1}: {lines[n][:450]}")
