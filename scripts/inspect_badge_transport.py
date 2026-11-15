@@ -26,3 +26,12 @@ for q in queries:
         print("\nMATCH L",line+1)
         for n in range(max(0,line-2),min(len(lines),line+22)):
             print(f"{n+1}: {lines[n][:250]}")
+
+print("\n=== FEATURE HOOKS / INITIALIZERS ===")
+for needle in ["badgesInit(", "function questDispatch(", "function setSetting(", "function useSettings(", "function badgeStart(", "function badgeStop(", "function badgesStart(", "function badgesStop(", "function backgroundSync(", "if (features.badges)", "case 7656", "BADGE_FALLBACK_GAMES"]:
+  ix=[i for i,line in enumerate(lines) if needle in line]
+  print("\nNEEDLE",needle,"COUNT",len(ix))
+  for line in ix[:5]:
+    print("\nAT",line+1)
+    for k in range(max(0,line-4),min(len(lines),line+22)):
+      print(f"{k+1}: {lines[k][:250]}")
