@@ -208,7 +208,8 @@
         };
         const publishCurrent=()=>{
             const p=venusRpcNormalize(profile);
-            const result=venusRpcPublish(p,false);
+            const resume=rpcRunning&&venusRpcTransport.profileId===p.id;
+            const result=venusRpcPublish(p,resume);
             if (!result.ok) {setNotice(result.error);return;}
             const items=venusRpcProfiles().filter(x=>x.id!==p.id);
             items.unshift(p);
@@ -443,7 +444,8 @@
             button("Switch to compatibility and publish",()=>{
                 const p=venusRpcNormalize(Object.assign({},profile,{sendMode:"compat"}));
                 edit(p);
-                const result=venusRpcPublish(p,false);
+                const resume=rpcRunning&&venusRpcTransport.profileId===p.id;
+                const result=venusRpcPublish(p,resume);
                 if(!result.ok){setNotice(result.error);return;}
                 const profiles=venusRpcProfiles().filter(x=>x.id!==p.id);
                 profiles.unshift(p);
