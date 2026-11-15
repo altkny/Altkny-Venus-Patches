@@ -32,6 +32,7 @@ jobs:
           node --check patches/src/main/resources/venus/rpc_transport.js
           node --check patches/src/main/resources/venus/rpc_editor.js
           node tests/rpc_transport.cjs
+          node tests/rpc_timer.cjs
       - name: Commit integration
         run: |
           git config user.name "github-actions[bot]"
