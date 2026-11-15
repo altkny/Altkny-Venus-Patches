@@ -75,6 +75,14 @@ assert.equal(streaming.activity.url,"https://twitch.tv/test");
 const competing=rpc.build({...game,type:5},1700000000000);
 assert.equal(competing.activity.type,5);
 
+const beforeBlocked=actions.length;
+const blockedApp=rpc.publish({id:"app:spotify",name:"Spotify",category:"Music",sendMode:"compat",buttons:[]},false);
+assert.equal(blockedApp.ok,false,"Do not tell users a local-only app presence worked");
+assert.match(blockedApp.error,/Gateway/);
+assert.equal(actions.length,beforeBlocked,"Unregistered app must not dispatch fake success");
+const pendingGateway=rpc.publish({id:"app:spotify",name:"Spotify",category:"Music",sendMode:"kizzy",buttons:[]},false);
+assert.equal(pendingGateway.ok,false,"Gateway requires authorization");
+assert.equal(actions.length,beforeBlocked);
 assert.equal(rpc.publish(game,false).ok,true);
 assert.equal(ctx.settings.rpcStartedAt,rpc.state.startedAt);
 assert.equal(ctx.settings.rpcAccountId,ctx.currentId());
