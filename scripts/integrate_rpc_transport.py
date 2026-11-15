@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Integrate the experimental in-client RPC transport into Venus.
+"""Integrate Venus local RPC and the explicitly opted-in Kizzy-style Gateway.
 
-This never reads tokens, creates a new Gateway connection, or promises that
-Discord will expose the activity to other accounts. Reversible and idempotent.
+A user-supplied Gateway credential is never read from the Discord session,
+stored in settings, or logged. Source insertion is idempotent.
 """
 from pathlib import Path
 
@@ -10,6 +10,7 @@ root=Path(__file__).resolve().parents[1]
 runtime=root/"patches/src/main/resources/venus/bootstrap.js"
 ui=root/"patches/src/main/resources/venus/rpc_editor.js"
 transport=root/"patches/src/main/resources/venus/rpc_transport.js"
+gateway=root/"patches/src/main/resources/venus/rpc_gateway.js"
 s=runtime.read_text(encoding="utf-8")
 
 def replace_once(old,new):
@@ -39,6 +40,9 @@ if original != new:
 transport_begin='    const VENUS_RPC_SOCKET = "venus-custom-rpc";'
 transport_src=transport.read_text(encoding="utf-8")
 transport_src=transport_src[transport_src.index(transport_begin):].rstrip()+"\n"
+gateway_src=gateway.read_text(encoding="utf-8")
+gateway_begin='    const VENUS_RPC_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";'
+transport_src+=gateway_src[gateway_src.index(gateway_begin):].rstrip()+"\n"
 if transport_begin in s:
     # The standalone transport source is authoritative on every integration.
     # Keep its existing comment prefix and replace only our own code.
@@ -106,4 +110,4 @@ elif new_venus not in s:
 assert s.count('VENUS_RPC_STUDIO", "VENUS_LANGUAGE"') <= 1 or new_venus in s
 
 runtime.write_text(s,encoding="utf-8")
-print("Integrated token-free RPC sender, publish controls, restore and foreground service.")
+print("Integrated local RPC, opt-in Kizzy-style Gateway, navigation and foreground service.")
