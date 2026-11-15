@@ -26,7 +26,7 @@
             largeText:venusRpcClean(p.largeText),smallText:venusRpcClean(p.smallText),
             type:[0,1,2,3,5].includes(Number(p.type))?Number(p.type):0,
             streamUrl:venusRpcClean(p.streamUrl,512),
-            sendMode:p.sendMode==="compat"?"compat":"rich",
+            sendMode:p.sendMode==="kizzy"?"kizzy":p.sendMode==="compat"?"compat":"rich",
             timeOffsetSeconds:Math.max(0,Math.min(7*86400,Math.floor(Number(p.timeOffsetSeconds)||0))),
             elapsed:p.elapsed === true,
             buttons:[0,1].map(i=>({label:venusRpcClean(buttons[i] && buttons[i].label,32),
@@ -119,6 +119,9 @@
         const [search,setSearch]=React.useState("");
         const [visible,setVisible]=React.useState(12);
         const [liveSync,setLiveSync]=React.useState(true);
+        const [gatewayToken,setGatewayToken]=React.useState("");
+        const [gatewayConsent,setGatewayConsent]=React.useState(false);
+        useSettings("rpcGateway");
         const [tab,setTab]=React.useState("games");
         const [manualTime,setManualTime]=React.useState(()=>
             venusRpcTime(venusRpcNormalize(venusRpcProfiles().find(x=>x.id===settings.rpcSelected)||
@@ -206,20 +209,32 @@
             edit(p);
             setNotice("Profile saved on this device.");
         };
-        const publishCurrent=()=>{
-            const p=venusRpcNormalize(profile);
-            const resume=rpcRunning&&venusRpcTransport.profileId===p.id;
-            const result=venusRpcPublish(p,resume);
-            if (!result.ok) {setNotice(result.error);return;}
-            const items=venusRpcProfiles().filter(x=>x.id!==p.id);
-            items.unshift(p);
+        const publishProfile=p=>{
+            const normalized=venusRpcNormalize(p);
+            const resume=rpcRunning&&venusRpcTransport.profileId===normalized.id;
+            const result=venusRpcPublish(normalized,resume);
+            if(!result.ok){setNotice(result.error);return false;}
+            const items=venusRpcProfiles().filter(x=>x.id!==normalized.id);
+            items.unshift(normalized);
             setSetting("rpcProfiles",JSON.stringify(items.slice(0,32)));
-            setSetting("rpcSelected",p.id);
+            setSetting("rpcSelected",normalized.id);
             setSetting("rpcEnabled",true);
             backgroundSync();
-            edit(p);
+            edit(normalized);
             setStarted(venusRpcTransport.startedAt);
-            setNotice("Activity dispatched. Another Discord client must confirm its public visibility.");
+            setNotice(result.pending?
+                "Kizzy Gateway is connecting. Wait for the published status before checking another device.":
+                "Activity sent. Verify its public visibility from another Discord client.");
+            return true;
+        };
+        const publishCurrent=()=>publishProfile(profile);
+        const authorizeGateway=()=>{
+            const consent=venusRpcGatewayAuthorize(gatewayToken,gatewayConsent);
+            if(!consent.ok){setNotice(consent.error);return;}
+            setGatewayToken("");
+            const p=venusRpcNormalize(Object.assign({},profile,{sendMode:"kizzy"}));
+            setTab("send");
+            publishProfile(p);
         };
         const stopCurrent=()=>{
             setSetting("rpcEnabled",false);
@@ -264,13 +279,14 @@
             text("Publication format",{fontSize:15,fontWeight:"700"}),
             button("Full Rich Presence · Application ID",()=>
                 edit(p=>Object.assign({},p,{sendMode:"rich"})),
-                profile.sendMode!=="compat","rich"),
+                profile.sendMode==="rich","rich"),
             button("Compatibility · Name-only game",()=>
                 edit(p=>Object.assign({},p,{sendMode:"compat"})),
                 profile.sendMode==="compat","compat"),
-            text("Both use the local Discord client. Compatibility removes the Application ID and custom assets. It may help with unsupported game IDs, but visibility is not guaranteed.",
-                {color:muted,fontSize:12,lineHeight:18}),
-            text("Kizzy-style Gateway authentication is not included: the Venus patch will not extract or request your Discord account token.",
+            button("Kizzy Gateway · Independent WebSocket",()=>
+                edit(p=>Object.assign({},p,{sendMode:"kizzy"})),
+                profile.sendMode==="kizzy","kizzy"),
+            text("Full and Compatibility use Discord's local activity dispatcher. Kizzy Gateway opens a distinct authenticated WebSocket and sends PRESENCE_UPDATE (opcode 3).",
                 {color:muted,fontSize:12,lineHeight:18}));
         const image=(p,small,size)=>el(VenusRpcCover,{
             key:(small?"small:":"cover:")+(venusRpcPreviewImage(p,small)||"none"),
@@ -283,7 +299,8 @@
             backgroundColor:"#20232b",borderWidth:1,borderColor:"#414651",padding:15,gap:10}},
             el(RN.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}},
                 text((VENUS_RPC_TYPES.find(row=>row[0]===profile.type)||VENUS_RPC_TYPES[0])[1].toUpperCase()+
-                    " · "+(profile.sendMode==="compat"?"COMPATIBILITY":"RICH PRESENCE"),
+                    " · "+(profile.sendMode==="kizzy"?"KIZZY GATEWAY":
+                        profile.sendMode==="compat"?"COMPATIBILITY":"RICH PRESENCE"),
                     {fontSize:10,color:muted,fontWeight:"700",letterSpacing:0.5}),
                 text("LIVE PREVIEW",{fontSize:10,color:"#a8b0ff",fontWeight:"700"})),
             el(RN.View,{style:{flexDirection:"row",gap:12,alignItems:"center"}},
@@ -422,9 +439,41 @@
             field("Small image description","smallText","Icon"),
             text("Activity buttons",{fontSize:16,fontWeight:"700"}),
             ...buttons);
+        const gatewayPanel=profile.sendMode==="kizzy"?
+            el(RN.View,{key:"gatewayPanel",style:{gap:10,padding:12,borderRadius:14,
+                borderWidth:1,borderColor:"#535976",backgroundColor:"#212534"}},
+                text("Kizzy Gateway · manual authorization",{fontSize:16,fontWeight:"700"}),
+                text("This is an independent user session, not a regular Discord RPC connection. Discord can reject it or restrict the account. Use it only if you accept that risk.",
+                    {color:"#efc4a2",fontSize:12,lineHeight:18}),
+                text("Your token is a private account credential. Venus does not read it from Discord, save it in settings/backups, or log it. It is sent only to Discord's Gateway and cleared from memory when stopped.",
+                    {color:muted,fontSize:12,lineHeight:18}),
+                el(RN.View,{style:{flexDirection:"row",alignItems:"center",gap:12}},
+                    el(RN.Switch,{value:gatewayConsent,onValueChange:setGatewayConsent}),
+                    el(RN.View,{style:{flex:1}},text("I understand the risks and agree to use this independent connection.",
+                        {fontSize:12,fontWeight:"600"}))),
+                el(RN.TextInput,{accessibilityLabel:"Discord account token for Kizzy Gateway",
+                    placeholder:venusRpcGatewayAuthorized()?"Authorized for this session":"Account token (never saved)",
+                    placeholderTextColor:"#9198a8",value:gatewayToken,
+                    secureTextEntry:true,autoCapitalize:"none",autoCorrect:false,
+                    maxLength:256,onChangeText:setGatewayToken,
+                    style:{color:fg,backgroundColor:"#171a21",padding:12,
+                        borderWidth:1,borderColor:line,borderRadius:10}}),
+                text("Connection: "+venusRpcGateway.status+
+                    (venusRpcGateway.error?" · "+venusRpcGateway.error:""),
+                    {fontSize:12,color:venusRpcGateway.status==="published"?"#89d2ad":muted}),
+                button(venusRpcGatewayAuthorized()?"Replace token and publish":"Authorize Gateway and publish",
+                    authorizeGateway,false,"authorizeGateway"),
+                venusRpcGatewayAuthorized()?button("Stop and forget Gateway token",()=>{
+                    setSetting("rpcEnabled",false);
+                    venusRpcClear();
+                    setNotice("Gateway stopped; credential erased from memory.");
+                },false,"forgetGateway"):null,
+                text("After restarting Discord, authorization is required again. Credentials are never backed up.",
+                    {color:muted,fontSize:11,lineHeight:17})):null;
         const sending=el(RN.View,{key:"sendingTab",style:{gap:10}},
             text("How activity is sent",{fontSize:18,fontWeight:"700"}),
             deliveryPicker,
+            gatewayPanel,
             text("Discord application",{fontSize:16,fontWeight:"700"}),
             field("Application ID","applicationId","Enter the game's registered ID",20),
             text("A game in the searchable directory is not necessarily publishable as Rich Presence. Discord may filter unsupported applications.",
@@ -435,7 +484,8 @@
             text("Automatic synchronization sends only changed payloads. The timestamp stays unchanged unless you edit the timer.",
                 {fontSize:12,color:muted,lineHeight:18}),
             text("Connection diagnostics",{fontSize:16,fontWeight:"700"}),
-            text("Sender: local Discord activity dispatcher",{fontSize:12,color:muted}),
+            text("Sender: "+(profile.sendMode==="kizzy"?"Independent Kizzy Gateway":
+                "Local Discord activity dispatcher"),{fontSize:12,color:muted}),
             text("Last dispatch: "+(venusRpcTransport.lastSent?
                 new Date(venusRpcTransport.lastSent).toLocaleTimeString():"Not sent yet"),
                 {fontSize:12,color:muted}),
