@@ -30,7 +30,9 @@ jobs:
       - name: Test RPC transport
         run: |
           node --check patches/src/main/resources/venus/rpc_transport.js
+          node --check patches/src/main/resources/venus/rpc_gateway.js
           node --check patches/src/main/resources/venus/rpc_editor.js
+          node tests/rpc_gateway.cjs
           node tests/rpc_transport.cjs
           node tests/rpc_timer.cjs
           node tests/rpc_navigation.cjs
