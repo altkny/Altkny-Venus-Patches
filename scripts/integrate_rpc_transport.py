@@ -53,6 +53,8 @@ else:
 for old,new in [
  ('customRpc:true, rpcProfiles:', 'customRpc:true, rpcEnabled:false, rpcProfiles:'),
  ('customRpc: true, rpcProfiles:', 'customRpc: true, rpcEnabled: false, rpcProfiles:'),
+ ('rpcEnabled:false, rpcProfiles:', 'rpcEnabled:false, rpcStartedAt:0, rpcAccountId:"", rpcProfiles:'),
+ ('rpcEnabled: false, rpcProfiles:', 'rpcEnabled: false, rpcStartedAt: 0, rpcAccountId: "", rpcProfiles:'),
 ]:
     if old in s and new not in s:
         replace_once(old,new)
