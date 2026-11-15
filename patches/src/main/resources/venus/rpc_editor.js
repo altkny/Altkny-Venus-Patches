@@ -61,7 +61,8 @@
     ];
     const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",applicationId:"",details:"",state:"",
         iconHash:"",iconUrl:"",category:"Custom",largeImage:"",smallImage:"",largeText:"",smallText:"",
-        type:0,streamUrl:"",sendMode:"rich",timeOffsetSeconds:0,
+        type:0,streamUrl:"",platform:"",partyCurrent:0,partyMax:0,
+        sendMode:"rich",timeOffsetSeconds:0,
         elapsed:true,buttons:[{label:"",url:""},{label:"",url:""}]};
     function venusRpcClean(x,n) { return typeof x === "string" ? x.trim().slice(0,n || 128) : ""; }
     function venusRpcNormalize(value) {
@@ -80,6 +81,10 @@
             largeText:venusRpcClean(p.largeText),smallText:venusRpcClean(p.smallText),
             type:[0,1,2,3,5].includes(Number(p.type))?Number(p.type):0,
             streamUrl:venusRpcClean(p.streamUrl,512),
+            platform:["android","desktop","embedded","ios","ps4","ps5","samsung","xbox"]
+                .includes(p.platform)?p.platform:"",
+            partyCurrent:Math.max(0,Math.min(99,Math.floor(Number(p.partyCurrent)||0))),
+            partyMax:Math.max(0,Math.min(99,Math.floor(Number(p.partyMax)||0))),
             sendMode:p.sendMode==="kizzy"?"kizzy":p.sendMode==="compat"?"compat":"rich",
             timeOffsetSeconds:Math.max(0,Math.min(7*86400,Math.floor(Number(p.timeOffsetSeconds)||0))),
             elapsed:p.elapsed === true,
@@ -197,6 +202,8 @@
         React.useEffect(()=>{
             if(!liveSync || !rpcRunning || venusRpcTransport.profileId!==profile.id) return;
             if(!global.setTimeout) return;
+            // Discord's activity updates have a documented frequency limit.
+            const cooldown=Math.max(0,4200-(Date.now()-venusRpcTransport.lastSent));
             const handle=global.setTimeout(()=>{
                 if(!settings.rpcEnabled || venusRpcTransport.profileId!==profile.id) return;
                 const p=venusRpcNormalize(profile);
@@ -206,7 +213,7 @@
                     saved.unshift(p);
                     setSetting("rpcProfiles",JSON.stringify(saved.slice(0,64)));
                 }
-            },850);
+            },Math.max(850,cooldown));
             return ()=>{if(global.clearTimeout) global.clearTimeout(handle);};
         },[profile,liveSync,rpcRunning]);
         if (!RN || !React) return null;
@@ -360,7 +367,8 @@
         const image=(p,small,size)=>el(VenusRpcCover,{
             key:(small?"small:":"cover:")+(venusRpcPreviewImage(p,small)||"none"),
             uri:venusRpcPreviewImage(p,small),size:size||64,circle:!!small,
-            label:small?"?":(p.name||"GAME").slice(0,2).toUpperCase()
+            tint:VENUS_RPC_COLORS[p.category]||VENUS_RPC_COLORS.Custom,
+            label:small?"?":venusRpcMonogram(p.name)
         });
         const elapsedStart=rpcRunning&&venusRpcTransport.profileId===profile.id&&venusRpcTransport.startedAt ?
             venusRpcTransport.startedAt : started;
@@ -555,14 +563,38 @@
         const editor=el(RN.View,{key:"editorTab",style:{gap:10}},
             text("Activity type",{fontSize:17,fontWeight:"700"}),
             typePicker,
-            text("Game and status",{fontSize:16,fontWeight:"700"}),
+            text("Activity identity",{fontSize:16,fontWeight:"700"}),
+            text(profile.category==="Game"&&profile.applicationId?
+                "Discord game · Official name, app ID and icon. Live game stats must be entered manually.":
+                "Custom app · Set the activity name and what you are doing.",
+                {fontSize:12,color:muted,lineHeight:18}),
             field("Activity name","name","Minecraft"),
             field("Details","details","Exploring the Overworld"),
             field("State","state","In a world"),
             profile.type===1?field("Streaming URL","streamUrl","https://twitch.tv/channel",512):null,
+            text("Platform",{fontSize:14,fontWeight:"700"}),
+            el(RN.View,{style:{flexDirection:"row",flexWrap:"wrap",gap:6}},
+                [["","Automatic"],["android","Android"],["desktop","Desktop"],
+                    ["ios","iOS"],["xbox","Xbox"],["ps5","PS5"]].map(([value,label])=>
+                    button(label,()=>edit(p=>Object.assign({},p,{platform:value})),
+                        profile.platform===value,"platform:"+label))),
+            text("Group size (optional)",{fontSize:14,fontWeight:"700"}),
+            el(RN.View,{style:{flexDirection:"row",gap:9}},
+                ...[["Current","partyCurrent"],["Maximum","partyMax"]].map(([label,key])=>
+                    el(RN.View,{key,style:{flex:1,gap:5}},
+                        text(label,{fontSize:12,color:muted}),
+                        el(RN.TextInput,{keyboardType:"number-pad",
+                            value:profile[key]?String(profile[key]):"",
+                            placeholder:"None",placeholderTextColor:"#858b9e",
+                            maxLength:2,onChangeText:value=>
+                                edit(p=>Object.assign({},p,{[key]:Math.min(99,Number(value)||0)})),
+                            style:{backgroundColor:"#171a21",color:fg,padding:11,borderRadius:10}})))),
             text("Activity timer",{fontSize:16,fontWeight:"700"}),elapsedPicker,
             text("Artwork",{fontSize:16,fontWeight:"700"}),
-            field("Large image URL or asset ID","largeImage","https://example.com/art.png",256),
+            field("Profile cover URL (preview only)","iconUrl","https://example.com/cover.png",512),
+            text("Discord displays the application's registered icon by default. Use registered asset IDs or publicly accessible HTTPS images below to set custom artwork.",
+                {fontSize:12,color:muted,lineHeight:18}),
+            field("Large artwork URL or asset ID","largeImage","https://example.com/art.png",256),
             field("Large image description","largeText","Cover art"),
             field("Small image URL or asset ID","smallImage","https://example.com/icon.png",256),
             field("Small image description","smallText","Icon"),
@@ -610,7 +642,7 @@
             el(RN.View,{style:{flexDirection:"row",alignItems:"center",justifyContent:"space-between"}},
                 text("Sync edits automatically",{fontSize:13,fontWeight:"600"}),
                 el(RN.Switch,{value:liveSync,onValueChange:setLiveSync})),
-            text("Automatic synchronization sends only changed payloads. The timestamp stays unchanged unless you edit the timer.",
+            text("Automatic synchronization coalesces edits and reduces rapid activity updates. The timestamp stays unchanged unless you edit the timer.",
                 {fontSize:12,color:muted,lineHeight:18}),
             text("Connection diagnostics",{fontSize:16,fontWeight:"700"}),
             text("Sender: "+(profile.sendMode==="kizzy"?"Independent Kizzy Gateway":
@@ -636,7 +668,7 @@
         const sections=[
             el(RN.View,{key:"title",style:{gap:5}},
                 text("Rich Presence Studio",{fontSize:21,fontWeight:"800"}),
-                text("Live activity, artwork, game library and publishing controls.",{color:muted,fontSize:12})),
+                text("Official games · Apps · Artwork · Quick switching",{color:muted,fontSize:12})),
             preview,
             el(RN.View,{key:"actions",style:{flexDirection:"row",flexWrap:"wrap",gap:8}},
                 button(rpcRunning?"Update activity":"Publish activity",publishCurrent,true),
@@ -650,7 +682,7 @@
             tab==="send"?sending:null,
             tab==="editor"?el(RN.View,{key:"editActions",style:{flexDirection:"row",flexWrap:"wrap",gap:8}},
                 button("Delete saved",removeCurrent,false)):null,
-            text("The preview is local. Other Discord clients control which activities, buttons and elapsed seconds they display.",
+            text("Game icons are loaded from the Discord directory. Other apps use editable templates, not live app detection. Final appearance depends on Discord.",
                 {fontSize:11,color:muted,lineHeight:17})
         ];
         return el(RN.ScrollView,{key:"venusRpcEditor",keyboardShouldPersistTaps:"handled",
