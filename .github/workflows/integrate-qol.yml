@@ -20,6 +20,7 @@ jobs:
           python3 scripts/polish_quest_dashboard.py
           python3 scripts/quest_parallel_dashboard.py
           python3 scripts/integrate_custom_rpc.py
+          python3 scripts/integrate_rpc_transport.py
       - name: Update experimental QoL translations
         run: python3 scripts/qol_i18n.py
       - name: Validate JavaScript syntax
