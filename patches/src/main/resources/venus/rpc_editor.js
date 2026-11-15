@@ -36,6 +36,20 @@
         const n=Math.max(0,Math.floor(seconds)), h=Math.floor(n/3600), m=Math.floor(n%3600/60), s=n%60;
         return (h ? h+":" : "")+String(m).padStart(h?2:1,"0")+":"+String(s).padStart(2,"0");
     }
+    function VenusRpcCover(props) {
+        const [failed,setFailed]=React.useState(false);
+        React.useEffect(()=>{setFailed(false);},[props.uri]);
+        const size=props.size||64;
+        const radius=props.circle?size/2:12;
+        return el(RN.View,{style:{height:size,width:size,borderRadius:radius,
+            backgroundColor:"#363d50",alignItems:"center",justifyContent:"center",overflow:"hidden"}},
+            props.uri&&!failed?el(RN.Image,{
+                source:{uri:props.uri},resizeMode:"cover",
+                onError:()=>setFailed(true),
+                style:{width:size,height:size,borderRadius:radius}
+            }):el(RN.Text,{style:{fontSize:size<40?10:12,color:"#d1d8ff",fontWeight:"700"}},
+                props.label||"GAME"));
+    }
     function VenusRpcSettings() {
         useSettings("rpcProfiles"); useSettings("rpcSelected"); useSettings("rpcEnabled"); useSettings("rpcCatalog");
         const [profile,edit]=React.useState(()=>venusRpcNormalize(
@@ -45,13 +59,13 @@
         const [tick,setTick]=React.useState(0);
         const [notice,setNotice]=React.useState("");
         const [search,setSearch]=React.useState("");
-        const [visible,setVisible]=React.useState(36);
+        const [visible,setVisible]=React.useState(12);
         const [liveSync,setLiveSync]=React.useState(true);
         const rpcRunning=!!(settings.rpcEnabled && venusRpcTransport.active);
         React.useEffect(()=>{
             let active=true;
             Promise.resolve().then(()=>venusRpcCatalogLoad(false)).catch(()=>{}).then(()=>{
-                if(active) setVisible(n=>Math.max(36,n));
+                if(active) setVisible(n=>Math.max(12,n));
             });
             return ()=>{active=false;};
         },[]);
@@ -155,20 +169,7 @@
             edit(venusRpcNormalize(VENUS_RPC_EMPTY));
             setNotice("Saved profile removed.");
         };
-        function RpcCover(props) {
-            const [failed,setFailed]=React.useState(false);
-            React.useEffect(()=>{setFailed(false);},[props.uri]);
-            const size=props.size||64;
-            const tile={height:size,width:size,borderRadius:props.circle?size/2:12,
-                backgroundColor:"#363d50",alignItems:"center",justifyContent:"center",overflow:"hidden"};
-            return el(RN.View,{style:tile},
-                props.uri&&!failed ? el(RN.Image,{
-                    source:{uri:props.uri},resizeMode:"cover",
-                    onError:()=>setFailed(true),
-                    style:{width:size,height:size,borderRadius:tile.borderRadius}}):
-                    text(props.label||"GAME",{fontSize:size<40?10:12,color:"#d1d8ff",fontWeight:"700"}));
-        }
-        const image=(p,small,size)=>el(RpcCover,{
+        const image=(p,small,size)=>el(VenusRpcCover,{
             key:(small?"small:":"cover:")+(venusRpcPreviewImage(p,small)||"none"),
             uri:venusRpcPreviewImage(p,small),size:size||64,circle:!!small,
             label:small?"?":(p.name||"GAME").slice(0,2).toUpperCase()
@@ -198,10 +199,10 @@
                 "Preview mode · select a game and publish to start.",
                 {fontSize:11,color:rpcRunning?"#86d6b2":"#e7c88a"}));
         const catalog=venusRpcKnownGames();
-        const featured=VENUS_RPC_GAMES.map(name=>catalog.find(g=>g.name.toLowerCase()===name.toLowerCase())).filter(Boolean);
+        const featured=VENUS_RPC_GAMES.map(name=>catalog.find(g=>g.name.toLowerCase()===name.toLowerCase())).filter(Boolean).slice(0,10);
         const query=search.trim().toLowerCase();
         const matches=React.useMemo(()=>{
-            if(!query) return catalog.slice(0,visible);
+            if(!query) return catalog.slice(0,visible+1);
             const found=[];
             for(const game of catalog){
                 if(game.name.toLowerCase().includes(query)||game.id.includes(query)){
@@ -234,7 +235,7 @@
                 placeholder:"Search thousands of games by name or ID...",
                 placeholderTextColor:"#858b9e",value:search,
                 autoCapitalize:"none",autoCorrect:false,
-                onChangeText:value=>{setSearch(value);setVisible(36);},
+                onChangeText:value=>{setSearch(value);setVisible(12);},
                 style:{color:fg,backgroundColor:"#171a21",borderColor:line,borderWidth:1,
                     borderRadius:12,paddingHorizontal:13,paddingVertical:11,fontSize:14}}),
             text((venusRpcCatalog.source==="discord"?"Official Discord directory: ":
@@ -242,7 +243,7 @@
                 "Offline fallback: ")+catalog.length+" games",
                 {color:muted,fontSize:12}),
             venusRpcCatalog.error?text("Catalog: "+venusRpcCatalog.error,{color:"#e6bb8d",fontSize:12}):null,
-            el(RN.View,{style:{gap:2}},gamesToShow.map(gameRow)),
+            el(RN.View,{style:{gap:2}},gamesToShow.length?gamesToShow.map(gameRow):text("No matching games in the loaded catalog.",{fontSize:12,color:muted})),
             matches.length>visible?button("Load more games",()=>setVisible(n=>Math.min(n+48,300)),false,"moreGames"):null,
             button("Refresh official game list",()=>{
                 setNotice("Updating game catalog...");
