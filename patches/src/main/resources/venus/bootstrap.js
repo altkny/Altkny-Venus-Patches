@@ -6331,6 +6331,8 @@
         if(!features.customRpc) return;
         // The dispatcher may not be initialized when settings are loaded.
         later(venusRpcRestore,2500,false);
+        if(typeof venusRpcDetectionStart==="function")
+            later(venusRpcDetectionStart,3400,false);
     }
     function venusRpcAttach(dispatcher) {
         if(venusRpcTransport.attached || !dispatcher || typeof dispatcher.subscribe!=="function") return;
@@ -6345,9 +6347,17 @@
             later(venusRpcRestore,1500,false);
         });
         dispatcher.subscribe("LOGOUT",()=>{
+            if(typeof venusRpcDetectionStop==="function") {
+                setSetting("rpcDetectionEnabled",false);
+                venusRpcDetectionStop(true);
+            }
             venusRpcClear();venusRpcTransport.connected=false;venusRpcTransport.account=null;
         });
         dispatcher.subscribe("MULTI_ACCOUNT_SWITCH_START",()=>{
+            if(typeof venusRpcDetectionStop==="function") {
+                setSetting("rpcDetectionEnabled",false);
+                venusRpcDetectionStop(true);
+            }
             venusRpcClear();venusRpcTransport.connected=false;venusRpcTransport.account=null;
         });
         if(currentId()) later(venusRpcRestore,1200,false);
@@ -6575,6 +6585,173 @@
         const connected=venusRpcGatewayOpen();
         return {ok:connected,pending:connected,error:connected?"":venusRpcGateway.error};
     }
+    const VENUS_RPC_KNOWN_PACKAGES = Object.freeze({
+        "Spotify":"com.spotify.music",
+        "YouTube Music":"com.google.android.apps.youtube.music",
+        "Apple Music":"com.apple.android.music",
+        "SoundCloud":"com.soundcloud.android",
+        "Deezer":"deezer.android.app",
+        "TIDAL":"com.aspiro.tidal",
+        "YouTube":"com.google.android.youtube",
+        "Netflix":"com.netflix.mediaclient",
+        "Prime Video":"com.amazon.avod.thirdpartyclient",
+        "Disney+":"com.disney.disneyplus",
+        "Twitch":"tv.twitch.android.app",
+        "Crunchyroll":"com.crunchyroll.crunchyroid",
+        "GitHub":"com.github.android",
+        "Termux":"com.termux",
+        "CapCut":"com.lemon.lvoverseas",
+        "Krita":"org.krita",
+        "Canva":"com.canva.editor",
+        "Obsidian":"md.obsidian",
+        "Notion":"notion.id",
+        "Google Docs":"com.google.android.apps.docs.editors.docs",
+        "Google Chrome":"com.android.chrome",
+        "Firefox":"org.mozilla.firefox",
+        "Telegram":"org.telegram.messenger",
+        "WhatsApp":"com.whatsapp"
+    });
+    const venusRpcDetection = {
+        active:false,busy:false,timer:null,generation:0,
+        status:"off",error:"",granted:false,
+        packageName:"",managedId:null,lastPoll:0,
+        lastPublished:0
+    };
+    function venusRpcValidPackage(value) {
+        return typeof value==="string" &&
+            value.length>=3 && value.length<=128 &&
+            /^[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+$/.test(value);
+    }
+    function venusRpcDetectionCandidates() {
+        return venusRpcProfiles().filter(p=>p.autoDetect===true &&
+            venusRpcValidPackage(p.packageName)).slice(0,64);
+    }
+    function venusRpcDetectionState(status,error) {
+        venusRpcDetection.status=status;
+        venusRpcDetection.error=error||"";
+        notify("rpcDetection");
+    }
+    function venusRpcDetectionCheckPermission() {
+        return diagCall("rpc:permission").then(body=>{
+            const data=typeof body==="string"?JSON.parse(body):body;
+            venusRpcDetection.granted=!!(data&&data.granted);
+            notify("rpcDetection");
+            return venusRpcDetection.granted;
+        }).catch(()=>{
+            venusRpcDetection.granted=false;
+            venusRpcDetectionState("unsupported",
+                "The native Android detector is unavailable in this installation.");
+            return false;
+        });
+    }
+    function venusRpcDetectionOpenSettings() {
+        return diagCall("rpc:settings");
+    }
+    function venusRpcDetectionUnpublish() {
+        // Removing an automatic activity must NOT clear the Kizzy Gateway
+        // credential: the same authorized session can publish the next app.
+        if(!venusRpcDetection.managedId) return;
+        const managed=venusRpcDetection.managedId;
+        venusRpcDetection.managedId=null;
+        if(venusRpcTransport.profileId!==managed) return;
+        if(venusRpcTransport.mode==="kizzy"&&venusRpcGatewayAuthorized()&&
+           venusRpcGateway.active) venusRpcGatewayPublish(null,0);
+        else venusRpcDispatch(null);
+        venusRpcTransport.active=false;
+        venusRpcTransport.profileId=null;
+        venusRpcTransport.lastPayload=null;
+        setSetting("rpcEnabled",false);
+        backgroundSync();
+        notify("rpcEnabled");
+    }
+    function venusRpcDetectionHandle(data) {
+        const pkg=data&&typeof data.packageName==="string"?data.packageName:"";
+        venusRpcDetection.granted=!!(data&&data.granted);
+        if(!venusRpcDetection.granted) {
+            venusRpcDetectionUnpublish();
+            venusRpcDetectionState("permission","Grant Usage Access to detect apps.");
+            return;
+        }
+        venusRpcDetection.packageName=pkg;
+        const p=venusRpcDetectionCandidates().find(profile=>profile.packageName===pkg);
+        if(!p){
+            venusRpcDetectionUnpublish();
+            venusRpcDetectionState("watching","");
+            return;
+        }
+        if(venusRpcDetection.managedId===p.id&&venusRpcTransport.active&&
+            venusRpcTransport.profileId===p.id) {
+            venusRpcDetectionState("sharing","");
+            return;
+        }
+        const since=Number(data.since);
+        const offset=Number.isFinite(since)&&since>0&&since<=Date.now()?
+            Math.min(604800,Math.floor((Date.now()-since)/1000)):0;
+        const sending=venusRpcNormalize(Object.assign({},p,{
+            timeOffsetSeconds:p.elapsed?offset:0
+        }));
+        const result=venusRpcPublish(sending,false);
+        if(!result.ok) {
+            venusRpcDetectionState("error",result.error);
+            return;
+        }
+        venusRpcDetection.managedId=p.id;
+        venusRpcDetection.lastPublished=Date.now();
+        setSetting("rpcSelected",p.id);
+        setSetting("rpcEnabled",true);
+        backgroundSync();
+        venusRpcDetectionState(result.pending?"connecting":"sharing","");
+    }
+    function venusRpcDetectionPoll() {
+        if(!venusRpcDetection.active || !settings.rpcDetectionEnabled ||
+            !features.customRpc) return;
+        if(venusRpcDetection.busy) return;
+        const candidates=venusRpcDetectionCandidates();
+        if(!candidates.length){
+            venusRpcDetectionUnpublish();
+            venusRpcDetectionState("no-profiles","Enable detection on a saved app profile.");
+            return;
+        }
+        venusRpcDetection.busy=true;
+        const generation=venusRpcDetection.generation;
+        const allowlist=[...new Set(candidates.map(p=>p.packageName))];
+        diagCall("rpc:foreground",JSON.stringify(allowlist)).then(raw=>{
+            if(!venusRpcDetection.active||generation!==venusRpcDetection.generation) return;
+            const data=typeof raw==="string"?JSON.parse(raw):raw;
+            venusRpcDetection.lastPoll=Date.now();
+            venusRpcDetectionHandle(data);
+        }).catch(()=>{
+            if(generation!==venusRpcDetection.generation) return;
+            venusRpcDetectionState("unsupported","Android detector could not read Usage Access.");
+        }).then(()=>{venusRpcDetection.busy=false;});
+    }
+    function venusRpcDetectionStop(unpublish) {
+        venusRpcDetection.active=false;
+        venusRpcDetection.generation++;
+        if(venusRpcDetection.timer!==null&&global.clearInterval)
+            global.clearInterval(venusRpcDetection.timer);
+        venusRpcDetection.timer=null;
+        if(unpublish) venusRpcDetectionUnpublish();
+        venusRpcDetectionState("off","");
+        backgroundSync();
+    }
+    function venusRpcDetectionStart() {
+        if(!features.customRpc || !settings.rpcDetectionEnabled) return false;
+        if(venusRpcDetection.active) return true;
+        if(!global.setInterval) return false;
+        venusRpcDetection.active=true;
+        venusRpcDetection.generation++;
+        venusRpcDetectionState("checking","");
+        venusRpcDetectionCheckPermission().then(granted=>{
+            if(venusRpcDetection.active){
+                if(!granted) venusRpcDetectionState("permission","Grant Usage Access to detect apps.");
+                venusRpcDetectionPoll();
+            }
+        });
+        venusRpcDetection.timer=global.setInterval(venusRpcDetectionPoll,5000);
+        backgroundSync();
+        return true;
+    }
     const VENUS_RPC_GAMES = [
         "Minecraft","ROBLOX","VALORANT","Fortnite","Terraria","Stardew Valley",
         "Counter-Strike 2","League of Legends","Apex Legends","ELDEN RING",
@@ -6631,7 +6808,9 @@
         return VENUS_RPC_APPS.map(([name,category,type,details,state])=>({
             id:"app:"+name.toLowerCase().replace(/[^a-z0-9]+/g,"-"),
             name,category,type,details,state,source:"preset",applicationId:"",
-            sendMode:"kizzy",elapsed:type===0
+            packageName:typeof VENUS_RPC_KNOWN_PACKAGES!=="undefined"?
+                VENUS_RPC_KNOWN_PACKAGES[name]||"":"",
+            autoDetect:false,sendMode:"kizzy",elapsed:type===0
         }));
     }
     function venusRpcIsAppPreset(p) {
@@ -6645,7 +6824,8 @@
         [0,"Playing"],[2,"Listening"],[3,"Watching"],[1,"Streaming"],[5,"Competing"]
     ];
     const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",applicationId:"",details:"",state:"",
-        iconHash:"",iconUrl:"",category:"Custom",largeImage:"",smallImage:"",largeText:"",smallText:"",
+        iconHash:"",iconUrl:"",category:"Custom",packageName:"",autoDetect:false,
+        largeImage:"",smallImage:"",largeText:"",smallText:"",
         type:0,streamUrl:"",platform:"",partyCurrent:0,partyMax:0,
         sendMode:"rich",timeOffsetSeconds:0,
         elapsed:true,buttons:[{label:"",url:""},{label:"",url:""}]};
@@ -6660,6 +6840,9 @@
             iconUrl:venusRpcValidUrl(venusRpcClean(p.iconUrl,512))?
                 venusRpcClean(p.iconUrl,512):"",
             category:venusRpcClean(p.category,32)||"Custom",
+            packageName:/^[a-zA-Z0-9_]+(?:\.[a-zA-Z0-9_]+)+$/.test(
+                venusRpcClean(p.packageName,128))?venusRpcClean(p.packageName,128):"",
+            autoDetect:p.autoDetect===true,
             name:venusRpcClean(p.name) || "Custom Activity",
             details:venusRpcClean(p.details),state:venusRpcClean(p.state),
             largeImage:venusRpcClean(p.largeImage,256),smallImage:venusRpcClean(p.smallImage,256),
@@ -6771,12 +6954,17 @@
         const [gatewayToken,setGatewayToken]=React.useState("");
         const [gatewayConsent,setGatewayConsent]=React.useState(false);
         useSettings("rpcGateway");
+        useSettings("rpcDetection");
+        useSettings("rpcDetectionEnabled");
         const [tab,setTab]=React.useState("games");
         const [manualTime,setManualTime]=React.useState(()=>
             venusRpcTime(venusRpcNormalize(venusRpcProfiles().find(x=>x.id===settings.rpcSelected)||
                 VENUS_RPC_EMPTY).timeOffsetSeconds));
         const rpcRunning=!!(settings.rpcEnabled && venusRpcTransport.active &&
             (venusRpcTransport.mode!=="kizzy"||venusRpcGateway.status==="submitted"));
+        React.useEffect(()=>{
+            if(tab==="detect") venusRpcDetectionCheckPermission();
+        },[tab]);
         React.useEffect(()=>{
             let active=true;
             Promise.resolve().then(()=>venusRpcCatalogLoad(false)).catch(()=>{}).then(()=>{
@@ -6914,6 +7102,8 @@
             publishProfile(p);
         };
         const stopCurrent=()=>{
+            setSetting("rpcDetectionEnabled",false);
+            venusRpcDetectionStop(true);
             setSetting("rpcEnabled",false);
             venusRpcClear();
             setNotice("Activity stopped.");
@@ -7141,7 +7331,7 @@
                 style:{color:fg,backgroundColor:"#171a21",padding:10,borderRadius:10},
                 onChangeText:value=>updateButton(i,"url",value)})));
         const menu=el(RN.View,{key:"navigation",style:{flexDirection:"row",gap:7}},
-            [["games","Library"],["editor","Customize"],["send","Publication"]].map(([id,label])=>
+            [["games","Library"],["editor","Edit"],["detect","Detect"],["send","Send"]].map(([id,label])=>
                 el(RN.Pressable,{key:id,onPress:()=>setTab(id),accessibilityRole:"tab",
                     accessibilityState:{selected:tab===id},
                     style:{flex:1,alignItems:"center",paddingVertical:12,borderRadius:12,
@@ -7182,6 +7372,7 @@
                 "Custom app · Set the activity name and what you are doing.",
                 {fontSize:12,color:muted,lineHeight:18}),
             field("Activity name","name","Minecraft"),
+            field("Android package ID (detection only)","packageName","com.spotify.music",128),
             field("Details","details","Exploring the Overworld"),
             field("State","state","In a world"),
             profile.type===1?field("Streaming URL","streamUrl","https://twitch.tv/channel",512):null,
@@ -7281,6 +7472,71 @@
                 setSetting("rpcEnabled",true);
                 setNotice("Compatibility presence sent. Check its visibility on another client.");
             },false,"compatPublish"));
+        const updateDetectedProfile=on=>{
+            const p=venusRpcNormalize(Object.assign({},profile,{autoDetect:on}));
+            if(on&&!p.packageName) {
+                setTab("editor");
+                setNotice("Enter the Android package ID in Edit before enabling app detection.");
+                return;
+            }
+            edit(p);
+            const stored=venusRpcProfiles().filter(x=>x.id!==p.id);
+            stored.unshift(p);
+            setSetting("rpcProfiles",JSON.stringify(stored.slice(0,64)));
+            setSetting("rpcSelected",p.id);
+            if(settings.rpcDetectionEnabled) venusRpcDetectionPoll();
+        };
+        const detectionTab=el(RN.View,{key:"detectionTab",style:{gap:12}},
+            text("Automatic Android app detection",{fontSize:18,fontWeight:"700"}),
+            text("Detect which permitted app is in the foreground. This needs Android Usage Access. Monitoring is OFF by default and is limited to the profiles you choose.",
+                {fontSize:12,color:muted,lineHeight:18}),
+            el(RN.View,{style:{flexDirection:"row",alignItems:"center",
+                justifyContent:"space-between",padding:12,
+                borderWidth:1,borderColor:line,borderRadius:12}},
+                el(RN.View,{style:{flex:1,gap:4}},
+                    text("Enable detection",{fontWeight:"700",fontSize:14}),
+                    text("Only your approved apps",{fontSize:11,color:muted})),
+                el(RN.Switch,{value:!!settings.rpcDetectionEnabled,
+                    onValueChange:value=>{
+                        setSetting("rpcDetectionEnabled",value);
+                        if(value) venusRpcDetectionStart();
+                        else venusRpcDetectionStop(true);
+                    }})),
+            text("Android Usage Access: "+
+                (venusRpcDetection.granted?"Granted":"Not granted or unavailable"),
+                {fontSize:12,color:venusRpcDetection.granted?"#93d8b0":"#e9b998"}),
+            el(RN.View,{style:{flexDirection:"row",gap:7,flexWrap:"wrap"}},
+                button("Open permission settings",()=>{
+                    venusRpcDetectionOpenSettings().catch(()=>
+                        setNotice("Could not open Android Usage Access settings."));
+                },false,"openUsageSettings"),
+                button("Check permission",()=>{
+                    venusRpcDetectionCheckPermission().then(granted=>
+                        setNotice(granted?"Usage Access granted.":"Grant Usage Access for Venus in Android Settings."));
+                },false,"checkUsageSettings")),
+            el(RN.View,{style:{padding:12,borderRadius:12,
+                borderColor:"#424a60",borderWidth:1,gap:8}},
+                text("Current profile: "+profile.name,{fontWeight:"700",fontSize:14}),
+                text("Android ID: "+(profile.packageName||"Not specified"),
+                    {fontSize:12,color:muted}),
+                el(RN.View,{style:{flexDirection:"row",alignItems:"center",
+                    justifyContent:"space-between"}},
+                    el(RN.View,{style:{flex:1}},
+                        text("Allow this app to update my RPC",{fontSize:12,fontWeight:"600"})),
+                    el(RN.Switch,{value:!!profile.autoDetect,
+                        onValueChange:updateDetectedProfile}))),
+            text("Approved profiles: "+venusRpcDetectionCandidates().length,
+                {fontSize:12,color:muted}),
+            text("Detector: "+venusRpcDetection.status+
+                (venusRpcDetection.error?" · "+venusRpcDetection.error:""),
+                {fontSize:12,color:venusRpcDetection.error?"#efb9a4":muted}),
+            venusRpcDetection.packageName?
+                text("Allowed app detected: "+venusRpcDetection.packageName,
+                    {fontSize:12,color:"#9fb4ee"}):null,
+            text("When an approved app becomes active, Venus selects its saved profile and attempts to publish. It stops sharing when the app is no longer active. No app history is stored or uploaded.",
+                {fontSize:12,color:muted,lineHeight:18}),
+            text("This detects the app, not track titles, videos or screen contents. Android may suspend background JavaScript and Discord can filter Rich Presence. A successful local send does not prove the activity appears publicly.",
+                {fontSize:11,color:muted,lineHeight:17}));
         const sections=[
             el(RN.View,{key:"title",style:{gap:5}},
                 text("Rich Presence Studio",{fontSize:21,fontWeight:"800"}),
@@ -7295,6 +7551,7 @@
             tab==="games"?el(RN.View,{key:"gamesTab",style:{gap:11}},
                 savedRows,presets):null,
             tab==="editor"?editor:null,
+            tab==="detect"?detectionTab:null,
             tab==="send"?sending:null,
             tab==="editor"?el(RN.View,{key:"editActions",style:{flexDirection:"row",flexWrap:"wrap",gap:8}},
                 button("Delete saved",removeCurrent,false)):null,
@@ -13699,7 +13956,8 @@
         const badgeBusy = !!(enabled("badges") && (badges.current && badgeNeedsGame() || badges.granting));
         const pushListening = !!(settings.userNotifPush && userNotifHasTargets()) || removedPushing();
         const rpcBusy = !!(features.customRpc && settings.rpcEnabled && venusRpcTransport.active);
-        const needed = questBusy || badgeBusy || rpcBusy || pushListening;
+        const detectionBusy = !!(features.customRpc && settings.rpcDetectionEnabled && venusRpcDetection.active);
+        const needed = questBusy || badgeBusy || rpcBusy || detectionBusy || pushListening;
         if (needed) unpauseGateway();
         const fg = bgKeepAlive.fg || inspectedExport(10002, "default");
         if (!needed) {
