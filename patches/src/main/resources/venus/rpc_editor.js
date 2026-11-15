@@ -391,63 +391,123 @@
                 "Preview mode · select a game and publish to start.",
                 {fontSize:11,color:rpcRunning?"#86d6b2":"#e7c88a"}));
         const catalog=venusRpcKnownGames();
-        const featured=VENUS_RPC_GAMES.map(name=>catalog.find(g=>g.name.toLowerCase()===name.toLowerCase())).filter(Boolean).slice(0,10);
+        const appTemplates=React.useMemo(venusRpcAppEntries,[]);
         const query=search.trim().toLowerCase();
+        const featured=React.useMemo(()=>VENUS_RPC_GAMES.map(name=>
+            catalog.find(g=>g.name.toLowerCase()===name.toLowerCase()))
+            .filter(Boolean).slice(0,6),[catalog]);
+        // Bound the mounted list to the current page: Android does not need
+        // thousands of image components or cards in a single ScrollView.
         const matches=React.useMemo(()=>{
-            if(!query) return catalog.slice(0,visible+1);
             const found=[];
             for(const game of catalog){
-                if(game.name.toLowerCase().includes(query)||game.id.includes(query)){
+                if(!query||game.name.toLowerCase().includes(query)||game.id.includes(query)){
                     found.push(game);
-                    if(found.length>=visible+1) break;
+                    if(found.length>visible) break;
                 }
             }
             return found;
         },[catalog,query,visible]);
         const gamesToShow=matches.slice(0,visible);
-        const gameRow=(game)=>el(RN.Pressable,{key:game.id,accessibilityRole:"button",
-            accessibilityLabel:game.name,onPress:()=>choose(game),
-            style:{flexDirection:"row",alignItems:"center",gap:10,padding:10,
-                marginBottom:5,borderRadius:12,borderWidth:1,
-                borderColor:profile.applicationId===game.id?"#8790fb":"#383c47",
-                backgroundColor:profile.applicationId===game.id?"#5865f22e":"#272a33"}},
-            image({applicationId:game.id,iconHash:game.icon,name:game.name},false,36),
-            el(RN.View,{style:{flex:1,gap:2}},
-                text(game.name,{fontSize:13,fontWeight:"600"}),
-                text(game.id,{fontSize:10,color:muted})),
-            profile.applicationId===game.id?text("✓",{fontSize:16,color:"#a9b3ff"}):null);
-        const featuredRows=el(RN.View,{key:"featured",style:{gap:6}},
-            text("Popular games",{fontSize:15,fontWeight:"700"}),
-            el(RN.View,{style:{gap:2}},featured.map(gameRow)));
-        const presets=el(RN.View,{key:"gameCatalog",style:{gap:9}},
-            featuredRows,
-            text("Discord game library",{fontSize:15,fontWeight:"700"}),
-            el(RN.TextInput,{
-                accessibilityLabel:"Search Discord games",
-                placeholder:"Search thousands of games by name or ID...",
-                placeholderTextColor:"#858b9e",value:search,
-                autoCapitalize:"none",autoCorrect:false,
-                onChangeText:value=>{setSearch(value);setVisible(12);},
-                style:{color:fg,backgroundColor:"#171a21",borderColor:line,borderWidth:1,
-                    borderRadius:12,paddingHorizontal:13,paddingVertical:11,fontSize:14}}),
-            text((venusRpcCatalog.source==="discord"?"Official Discord directory: ":
-                venusRpcCatalog.loading?"Loading Discord games · ":
-                "Offline fallback: ")+catalog.length+" games",
-                {color:muted,fontSize:12}),
-            venusRpcCatalog.error?text("Catalog: "+venusRpcCatalog.error,{color:"#e6bb8d",fontSize:12}):null,
-            el(RN.View,{style:{gap:2}},gamesToShow.length?gamesToShow.map(gameRow):text("No matching games in the loaded catalog.",{fontSize:12,color:muted})),
-            matches.length>visible?button("Load more games",()=>setVisible(n=>Math.min(n+48,300)),false,"moreGames"):null,
-            button("Refresh official game list",()=>{
-                setNotice("Updating game catalog...");
-                venusRpcCatalogLoad(true).then(g=>setNotice("Game catalog updated: "+g.length+" games."))
-                    .catch(()=>setNotice("Game catalog is unavailable."));
-            },false,"refreshGames"),
-            button("Custom activity",custom,profile.id==="custom","custom"));
+        const appMatches=React.useMemo(()=>appTemplates.filter(app=>
+            (appCategory==="All"||app.category===appCategory)&&
+            (!query||app.name.toLowerCase().includes(query)||
+                app.category.toLowerCase().includes(query))),[appTemplates,appCategory,query]);
+        const appsToShow=appMatches.slice(0,visible);
+        const tile=(item,isApp,featuredTile)=>{
+            const selected=profile.id===item.id||
+                (!isApp&&profile.applicationId===item.id);
+            const tileProfile=isApp?item:{
+                applicationId:item.id,iconHash:item.icon,name:item.name,category:"Game"
+            };
+            return el(RN.Pressable,{
+                key:(isApp?"app:":"game:")+item.id+(featuredTile?":top":""),
+                accessibilityRole:"button",
+                accessibilityLabel:(isApp?"App ":"Game ")+item.name,
+                accessibilityState:{selected},
+                onPress:()=>{choose(item);setNotice("");},
+                style:{
+                    flexDirection:"row",alignItems:"center",gap:12,
+                    paddingHorizontal:12,paddingVertical:11,marginBottom:4,
+                    borderRadius:15,borderWidth:1,
+                    borderColor:selected?"#8f98ff":"#3b404f",
+                    backgroundColor:selected?"#333c5e":"#242936"
+                }
+            },
+                image(tileProfile,false,48),
+                el(RN.View,{style:{flex:1,gap:4}},
+                    text(item.name,{fontSize:14,fontWeight:"700",numberOfLines:1}),
+                    text(isApp?item.category+" · "+(
+                        (VENUS_RPC_TYPES.find(t=>t[0]===item.type)||VENUS_RPC_TYPES[0])[1]
+                    )+" · Editable preset":"Official Discord game identity",
+                        {fontSize:11,color:muted,numberOfLines:1})),
+                selected?text("✓",{fontSize:19,color:"#a9b3ff",fontWeight:"700"}):
+                    text("›",{fontSize:23,color:"#8e96ae"}));
+        };
+        const librarySelector=el(RN.View,{key:"librarySwitch",
+            style:{flexDirection:"row",gap:8}},
+            button("Games · "+catalog.length,()=>{
+                setLibrary("games");setVisible(16);setSearch("");
+            },library==="games","libraryGames"),
+            button("Apps · "+appTemplates.length,()=>{
+                setLibrary("apps");setVisible(16);setSearch("");
+            },library==="apps","libraryApps"));
+        const searchField=el(RN.TextInput,{
+            key:"catalogSearch",
+            accessibilityLabel:library==="games"?"Search games":"Search apps",
+            placeholder:library==="games"?"Search official games or IDs...":
+                "Search music, video, creative apps...",
+            placeholderTextColor:"#9aa1b5",value:search,
+            autoCapitalize:"none",autoCorrect:false,
+            onChangeText:value=>{setSearch(value);setVisible(16);},
+            style:{color:fg,backgroundColor:"#171b27",borderColor:"#4a5165",
+                borderWidth:1,borderRadius:13,
+                paddingHorizontal:15,paddingVertical:12,fontSize:14}
+        });
+        const gamesCatalog=el(RN.View,{key:"gameCatalog",style:{gap:10}},
+            !query&&featured.length?el(RN.View,{style:{gap:5}},
+                text("Featured games",{fontSize:15,fontWeight:"700"}),
+                ...featured.map(g=>tile(g,false,true))):null,
+            text("Official game library",{fontSize:15,fontWeight:"700"}),
+            text((venusRpcCatalog.source==="discord"?"Discord directory · ":
+                venusRpcCatalog.loading?"Loading game directory · ":
+                "Offline fallback · ")+catalog.length+" available entries",
+                {fontSize:12,color:muted}),
+            venusRpcCatalog.error?text(venusRpcCatalog.error,
+                {fontSize:11,color:"#e6bb8d"}):null,
+            ...gamesToShow.map(g=>tile(g,false,false)),
+            !gamesToShow.length?text("No matching games.",{color:muted,fontSize:12}):null,
+            matches.length>visible?button("Show more games",()=>
+                setVisible(n=>Math.min(n+40,500)),false,"moreGames"):null,
+            button("Update game directory",()=>{
+                setNotice("Updating official game directory...");
+                venusRpcCatalogLoad(true)
+                    .then(g=>setNotice("Directory updated: "+g.length+" entries."))
+                    .catch(()=>setNotice("Game directory is unavailable."));
+            },false,"refreshGames"));
+        const appCatalog=el(RN.View,{key:"appCatalog",style:{gap:10}},
+            text("Apps beyond gaming",{fontSize:16,fontWeight:"700"}),
+            text("Music, video, development, art, productivity and social apps. Templates are editable, not automatic live integrations.",
+                {fontSize:12,color:muted,lineHeight:18}),
+            el(RN.View,{style:{flexDirection:"row",flexWrap:"wrap",gap:6}},
+                ...VENUS_RPC_CATEGORIES.map(category=>
+                    button(category,()=>{
+                        setAppCategory(category);setVisible(16);
+                    },appCategory===category,"cat:"+category))),
+            ...appsToShow.map(app=>tile(app,true,false)),
+            !appsToShow.length?text("No matching apps.",{fontSize:12,color:muted}):null,
+            appMatches.length>visible?button("Show more apps",()=>
+                setVisible(n=>Math.min(n+40,200)),false,"moreApps"):null,
+            button("Create a custom app profile",custom,false,"newApp"));
+        const presets=el(RN.View,{key:"catalog",style:{gap:12}},
+            librarySelector,searchField,
+            library==="apps"?appCatalog:gamesCatalog);
         const saved=venusRpcProfiles();
-        const savedRows=saved.length?el(RN.View,{key:"saved",style:{gap:8}},
-            text("Saved profiles",{fontSize:15,fontWeight:"700"}),
-            el(RN.View,{style:{flexDirection:"row",flexWrap:"wrap",gap:7}},
-                saved.map(p=>button(p.name,()=>choose(p),p.id===profile.id,p.id+"saved")))):null;
+        const savedRows=saved.length?el(RN.View,{key:"saved",style:{gap:7}},
+            text("Quick switch · Saved profiles",{fontSize:15,fontWeight:"700"}),
+            el(RN.ScrollView,{horizontal:true,showsHorizontalScrollIndicator:false,
+                contentContainerStyle:{flexDirection:"row",gap:7,paddingVertical:2}},
+                ...saved.map(p=>button(p.name,()=>choose(p),p.id===profile.id,p.id+"saved")))):null;
         const buttons=[0,1].map(i=>el(RN.View,{key:"custombutton"+i,style:{gap:6,marginVertical:4}},
             text("Button "+(i+1),{fontSize:13,fontWeight:"700"}),
             el(RN.TextInput,{accessibilityLabel:"Button "+(i+1)+" label",value:profile.buttons[i].label,
