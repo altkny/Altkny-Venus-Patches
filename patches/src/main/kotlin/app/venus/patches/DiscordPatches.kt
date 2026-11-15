@@ -8,8 +8,10 @@ import app.morphe.patcher.patch.AppTarget
 import app.morphe.patcher.patch.Compatibility
 import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.patch.rawResourcePatch
+import app.morphe.patcher.patch.resourcePatch
 import app.morphe.patcher.patch.PatchException
 import app.morphe.patcher.patch.PatchBuilder
+import org.w3c.dom.Element
 
 private const val INSTANCE = "Lcom/facebook/react/runtime/ReactInstance;"
 internal val discord = Compatibility(
@@ -1382,7 +1384,34 @@ val keepBluetoothAudioClear = bytecodePatch(
     }
 }
 
-/** Optional local rich presence editor. Does not publish external activities. */
+/** Usage access is a user-controlled special permission, never granted by the patch. */
+private val rpcUsagePermission = resourcePatch {
+    execute {
+        document("AndroidManifest.xml").use { manifest ->
+            val root = manifest.documentElement
+            val children = manifest.getElementsByTagName("uses-permission")
+            val name = "android.permission.PACKAGE_USAGE_STATS"
+            var present = false
+            for (i in 0 until children.length)
+                if ((children.item(i) as Element).getAttribute("android:name") == name)
+                    present = true
+            if (!present) {
+                val permission = manifest.createElement("uses-permission")
+                permission.setAttribute("android:name", name)
+                val app = manifest.getElementsByTagName("application").item(0)
+                root.insertBefore(permission, app)
+            }
+        }
+    }
+}
+
 @Suppress("unused")
-val customRichPresence = bundledPlugin("customRpc", "Custom Rich Presence editor",
-    "Create game presets and custom Discord activity previews. Publishing needs a validated Android RPC provider.")
+val customRichPresence = rawResourcePatch(
+    name = "Custom Rich Presence editor",
+    description = "Custom games and apps, Rich Presence publishing and opt-in Android foreground-app detection."
+) {
+    compatibleWith(discord)
+    section(PLUGINS)
+    dependsOn(venusSettings, rpcUsagePermission)
+    execute { additionalSelections += "customRpc" }
+}
