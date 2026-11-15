@@ -27,6 +27,7 @@ const ctx={
   backgroundSync:()=>{},
   notify:()=>{},
   later:()=>{},
+  setSetting:(key,value)=>{ctx.settings[key]=value;return true;},
   Date,console
 };
 vm.createContext(ctx);
@@ -44,11 +45,30 @@ assert.equal(data.activity.timestamps.start,1700000000000);
 assert.equal(data.activity.buttons[0],"Visit");
 assert.equal(data.activity.metadata.button_urls[0],"https://example.org");
 assert.equal(rpc.publish(game,false).ok,true);
+assert.equal(ctx.settings.rpcStartedAt,rpc.state.startedAt);
+assert.equal(ctx.settings.rpcAccountId,ctx.currentId());
 assert.equal(actions.at(-1).type,"LOCAL_ACTIVITY_UPDATE");
 assert.equal(actions.at(-1).socketId,"venus-custom-rpc");
 assert.equal(actions.at(-1).activity.name,"Minecraft");
 rpc.clear();
 assert.equal(actions.at(-1).activity,null);
+// A restart recovers the original epoch; a subsequent edit never moves it.
+const previous=Date.now()-4272;
+ctx.settings.rpcStartedAt=previous;
+ctx.settings.rpcAccountId=ctx.currentId();
+ctx.settings.rpcEnabled=true;
+assert.equal(rpc.publish(game,true).ok,true);
+assert.equal(actions.at(-1).activity.timestamps.start,previous);
+assert.equal(rpc.publish({...game,details:"updated"},true).ok,true);
+assert.equal(actions.at(-1).activity.timestamps.start,previous);
+// The reset button republishes with a fresh timestamp.
+assert.equal(rpc.publish(game,false).ok,true);
+assert.ok(rpc.state.startedAt>previous);
+assert.equal(actions.at(-1).activity.timestamps.start,rpc.state.startedAt);
+ctx.settings.rpcEnabled=false;
+rpc.clear();
+assert.equal(ctx.settings.rpcStartedAt,0);
+assert.equal(ctx.settings.rpcAccountId,"");
 assert.equal(rpc.publish({id:"custom",name:"Unregistered",buttons:[]},false).ok,false);
 assert.equal(actions.at(-1).activity,null);
 console.log("RPC transport unit tests passed (external Discord publication not tested).");
