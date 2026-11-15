@@ -55,7 +55,9 @@
         if(!venusRpcGatewaySend(3,venusRpcGatewayPresence(
             venusRpcGateway.activity,venusRpcGateway.start))) return false;
         venusRpcGateway.lastSent=Date.now();
-        venusRpcGatewayStatus("published","");
+        // Discord does not acknowledge presence publication. This only
+        // confirms that the WebSocket accepted our outgoing frame.
+        venusRpcGatewayStatus("submitted","");
         return true;
     }
     function venusRpcGatewayCloseSocket() {
