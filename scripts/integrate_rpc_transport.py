@@ -95,5 +95,15 @@ if root_route not in s:
         + '            next.VENUS_RPC_STUDIO.useDescription = () => "Manage your activity, games and publishing";\n'
         + '        }\n'
         + '        // Language: the language Venus settings are shown in, Discord\'s own by default.')
+# A route in nativeRegistry is searchable, but it is NOT visible in the
+# Discord settings list until settingsSections explicitly includes its ID.
+old_venus='section("Venus", ["VENUS_PLUGINS", "VENUS_LANGUAGE", "VENUS_BACKUP", "VENUS_GENERAL"])'
+new_venus='section("Venus", ["VENUS_PLUGINS", ...(features.customRpc ? ["VENUS_RPC_STUDIO"] : []), "VENUS_LANGUAGE", "VENUS_BACKUP", "VENUS_GENERAL"])'
+if old_venus in s and new_venus not in s:
+    replace_once(old_venus,new_venus)
+elif new_venus not in s:
+    raise RuntimeError("Venus settings menu anchor missing; cannot expose Rich Presence root route")
+assert s.count('VENUS_RPC_STUDIO", "VENUS_LANGUAGE"') <= 1 or new_venus in s
+
 runtime.write_text(s,encoding="utf-8")
 print("Integrated token-free RPC sender, publish controls, restore and foreground service.")
