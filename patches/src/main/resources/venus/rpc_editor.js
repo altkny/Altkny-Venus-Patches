@@ -1,11 +1,11 @@
 // Custom Rich Presence UI for the existing Venus bootstrap closure.
-// Activity publisher is intentionally not claimed until a verified Android transport exists.
+// Experimental publisher uses Discord's own in-client activity dispatcher.
     const VENUS_RPC_GAMES = [
         ["minecraft","Minecraft"], ["roblox","Roblox"], ["gtav","Grand Theft Auto V"],
         ["valorant","VALORANT"], ["fortnite","Fortnite"], ["genshin","Genshin Impact"],
         ["stardew","Stardew Valley"], ["terraria","Terraria"]
     ];
-    const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",details:"",state:"",
+    const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",applicationId:"",details:"",state:"",
         largeImage:"",smallImage:"",largeText:"",smallText:"",
         elapsed:true,buttons:[{label:"",url:""},{label:"",url:""}]};
     function venusRpcClean(x,n) { return typeof x === "string" ? x.trim().slice(0,n || 128) : ""; }
@@ -14,6 +14,7 @@
         const buttons = Array.isArray(p.buttons) ? p.buttons : [];
         return {
             id:venusRpcClean(p.id,64) || "custom",
+            applicationId:venusRpcClean(p.applicationId,20),
             name:venusRpcClean(p.name) || "Custom Activity",
             details:venusRpcClean(p.details),state:venusRpcClean(p.state),
             largeImage:venusRpcClean(p.largeImage,256),smallImage:venusRpcClean(p.smallImage,256),
@@ -35,7 +36,7 @@
         return (h ? h+":" : "")+String(m).padStart(h?2:1,"0")+":"+String(s).padStart(2,"0");
     }
     function VenusRpcSettings() {
-        useSettings("rpcProfiles"); useSettings("rpcSelected");
+        useSettings("rpcProfiles"); useSettings("rpcSelected"); useSettings("rpcEnabled");
         const [profile,edit]=React.useState(()=>venusRpcNormalize(
             venusRpcProfiles().find(x=>x.id===settings.rpcSelected) ||
             Object.assign({},VENUS_RPC_EMPTY,{name:"Minecraft",id:"minecraft"})));
@@ -43,6 +44,7 @@
         const [tick,setTick]=React.useState(0);
         const [notice,setNotice]=React.useState("");
         const [newId,setNewId]=React.useState("");
+        const rpcRunning=!!(settings.rpcEnabled && venusRpcTransport.active);
         React.useEffect(()=>{
             if (!profile.elapsed) return;
             const timer=global.setInterval?global.setInterval(()=>setTick(t=>t+1),1000):null;
@@ -91,9 +93,28 @@
             edit(p);
             setNotice("Profile saved on this device.");
         };
+        const publishCurrent=()=>{
+            const p=venusRpcNormalize(profile);
+            const result=venusRpcPublish(p,false);
+            if (!result.ok) {setNotice(result.error);return;}
+            const items=venusRpcProfiles().filter(x=>x.id!==p.id);
+            items.unshift(p);
+            setSetting("rpcProfiles",JSON.stringify(items.slice(0,32)));
+            setSetting("rpcSelected",p.id);
+            setSetting("rpcEnabled",true);
+            edit(p);
+            setStarted(venusRpcTransport.startedAt);
+            setNotice("Activity sent to Discord's local dispatcher. External visibility is not yet verified.");
+        };
+        const stopCurrent=()=>{
+            setSetting("rpcEnabled",false);
+            venusRpcClear();
+            setNotice("Activity stopped.");
+        };
         const removeCurrent=()=>{
             const items=venusRpcProfiles().filter(x=>x.id!==profile.id);
             setSetting("rpcProfiles",JSON.stringify(items));
+            if(settings.rpcSelected===profile.id) stopCurrent();
             setSetting("rpcSelected","");
             edit(venusRpcNormalize(VENUS_RPC_EMPTY));
             setNotice("Saved profile removed.");
@@ -104,7 +125,7 @@
             return el(RN.Image,{source:{uri:url},resizeMode:"cover",
                 style:{height:small?28:64,width:small?28:64,borderRadius:small?14:12}});
         };
-        const elapsed=profile.elapsed?venusRpcTime((Date.now()-started)/1000):null;
+        const elapsed=profile.elapsed?venusRpcTime((Date.now()-(rpcRunning && venusRpcTransport.profileId===profile.id ? venusRpcTransport.startedAt : started))/1000):null;
         const preview=el(RN.View,{key:"preview",accessible:true,style:{borderRadius:16,
             backgroundColor:"#20232b",borderWidth:1,borderColor:"#414651",padding:15,gap:10}},
             text("PROFILE PREVIEW",{fontSize:11,color:muted,fontWeight:"700",letterSpacing:1}),
@@ -122,7 +143,10 @@
                 el(RN.View,{key:"previewbutton"+i,style:{backgroundColor:"#414651",
                     borderRadius:8,paddingVertical:9,alignItems:"center"}},
                     text(b.label,{fontSize:13,fontWeight:"600"}))),
-            text("Preview only. Not published to your Discord profile.",{fontSize:11,color:"#e7c88a"}));
+            text(rpcRunning && venusRpcTransport.profileId===profile.id ?
+                "Sent to local Discord activity dispatcher. Check another account to verify." :
+                "Preview only. This profile is not currently active.",
+                {fontSize:11,color:"#e7c88a"}));
         const presets=el(RN.View,{key:"presets",style:{flexDirection:"row",flexWrap:"wrap",gap:7}},
             VENUS_RPC_GAMES.map(game=>button(game[1],()=>choose(game[0],game[1]),
                 profile.id===game[0],game[0])),
@@ -151,6 +175,7 @@
             savedRows,
             text("Edit activity",{fontSize:15,fontWeight:"700"}),
             field("Activity name","name","Minecraft"),
+            field("Discord Application ID","applicationId","Optional for recognized game presets",20),
             field("Details","details","Exploring the Overworld"),
             field("State","state","In a world"),
             field("Large image URL (HTTPS)","largeImage","https://example.com/image.png",256),
@@ -163,11 +188,13 @@
             text("Optional links",{fontSize:15,fontWeight:"700"}),
             ...buttons,
             el(RN.View,{key:"actions",style:{flexDirection:"row",flexWrap:"wrap",gap:8}},
-                button("Save profile",saveCurrent,true),
+                button("Publish activity",publishCurrent,true),
+                button("Stop publishing",stopCurrent,false),
+                button("Save profile",saveCurrent,false),
                 button("Reset timer",()=>setStarted(Date.now()),false),
                 button("Delete saved",removeCurrent,false)),
             notice?text(notice,{color:"#e7c88a"}):null,
-            text("Real publishing requires a verified Android RPC transport and a registered Discord application ID. No account token is collected or stored.",{color:muted,fontSize:12,lineHeight:18})
+            text("Experimental: this sends a local activity event through the signed-in Discord client. No token is requested. External visibility, images and buttons are not guaranteed; Discord may reject the activity.",{color:muted,fontSize:12,lineHeight:18})
         ];
         return el(RN.ScrollView,{key:"venusRpcEditor",keyboardShouldPersistTaps:"handled",
             contentContainerStyle:{padding:16,paddingBottom:40,gap:12}},...sections);
