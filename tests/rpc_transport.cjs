@@ -44,6 +44,19 @@ assert.equal(data.activity.details,"Overworld");
 assert.equal(data.activity.timestamps.start,1700000000000);
 assert.equal(data.activity.buttons[0],"Visit");
 assert.equal(data.activity.metadata.button_urls[0],"https://example.org");
+const compatibility=rpc.build({id:"unregistered",name:"Unknown game",sendMode:"compat",type:3,elapsed:true,buttons:[]},1700000000000);
+assert.equal(compatibility.error,undefined);
+assert.equal(compatibility.activity.type,3);
+assert.equal(Object.hasOwn(compatibility.activity,"application_id"),false);
+assert.equal(compatibility.activity.timestamps.start,1700000000000);
+const listening=rpc.build({...game,type:2},1700000000000);
+assert.equal(listening.activity.type,2);
+const streaming=rpc.build({...game,type:1,streamUrl:"https://twitch.tv/test"},1700000000000);
+assert.equal(streaming.activity.type,1);
+assert.equal(streaming.activity.url,"https://twitch.tv/test");
+const competing=rpc.build({...game,type:5},1700000000000);
+assert.equal(competing.activity.type,5);
+
 assert.equal(rpc.publish(game,false).ok,true);
 assert.equal(ctx.settings.rpcStartedAt,rpc.state.startedAt);
 assert.equal(ctx.settings.rpcAccountId,ctx.currentId());
@@ -73,6 +86,13 @@ assert.equal(rpc.publish(game,true).ok,true);
 assert.equal(actions.at(-1).activity.timestamps.start,previous);
 assert.equal(rpc.publish({...game,details:"updated"},true).ok,true);
 assert.equal(actions.at(-1).activity.timestamps.start,previous);
+// Editing only the elapsed offset updates the timestamp once.
+const offsetBefore=actions.length;
+assert.equal(rpc.publish({...game,timeOffsetSeconds:1800},true).ok,true);
+assert.ok(actions.at(-1).activity.timestamps.start<=Date.now()-1800000+2000);
+assert.equal(actions.length,offsetBefore+1);
+assert.equal(rpc.publish({...game,timeOffsetSeconds:1800},true).skipped,true);
+assert.equal(actions.length,offsetBefore+1);
 // The reset button republishes with a fresh timestamp.
 assert.equal(rpc.publish(game,false).ok,true);
 assert.ok(rpc.state.startedAt>previous);
