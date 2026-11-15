@@ -5,7 +5,7 @@
     const VENUS_RPC_PID = 20941;
     const venusRpcTransport = {attached:false, connected:false, active:false,
         startedAt:0, profileId:null, error:"", lastSent:0, account:null,
-        lastPayload:null, timeOffset:0};
+        lastPayload:null, timeOffset:0, mode:"rich"};
     // Discord's own detectable games directory, loaded on demand only.
     // A search result always carries its real Discord application ID and icon hash.
     const venusRpcCatalog = {games:null,loading:null,at:0,error:"",source:"fallback"};
@@ -110,7 +110,7 @@
     }
     function venusRpcBuildActivity(profile, startedAt) {
         const p=venusRpcNormalize(profile), app=venusRpcAppId(p);
-        if (!app && p.sendMode!=="compat") return {error:"This game needs an Application ID. Try Compatibility mode."};
+        if (!app && p.sendMode==="rich") return {error:"This game needs an Application ID. Try Compatibility or Kizzy Gateway."};
         if (!p.name) return {error:"An activity name is required."};
         const buttons=p.buttons.filter(b=>b.label&&venusRpcValidUrl(b.url)).slice(0,2);
         if (p.buttons.some(b=>(b.label||b.url)&&(!b.label||!venusRpcValidUrl(b.url))))
@@ -118,10 +118,11 @@
         // Both modes use the already-authenticated local client dispatcher.
         // Compatibility sends a simplified game presence without an app ID.
         // It is not a Kizzy/Gateway connection and may still be filtered.
-        const mode=p.sendMode==="compat"?"compat":"rich";
+        const mode=p.sendMode==="compat"?"compat":p.sendMode==="kizzy"?"kizzy":"rich";
         const kind=[0,1,2,3,5].includes(p.type)?p.type:0;
         const activity={name:p.name,type:kind,flags:0};
-        if(mode==="rich") activity.application_id=app;
+        if(mode==="rich"||mode==="kizzy")
+            activity.application_id=app||(mode==="kizzy"?"962990036020756480":null);
         if(kind===1&&p.streamUrl){
             if(!venusRpcValidUrl(p.streamUrl)) return {error:"Streaming URL must be HTTPS."};
             activity.url=p.streamUrl;
@@ -136,7 +137,8 @@
         if(p.smallImage) assets.small_image=p.smallImage;
         if(p.largeText) assets.large_text=p.largeText;
         if(p.smallText) assets.small_text=p.smallText;
-        if(Object.keys(assets).length&&mode==="rich") activity.assets=assets;
+        if(Object.keys(assets).length&&(mode==="rich"||mode==="kizzy"))
+            activity.assets=assets;
         if(buttons.length) {
             activity.buttons=buttons.map(b=>b.label);
             activity.metadata={button_urls:buttons.map(b=>b.url)};
@@ -158,7 +160,9 @@
         venusRpcTransport.startedAt=0;
         venusRpcTransport.lastPayload=null;
         venusRpcTransport.timeOffset=0;
-        if(was) venusRpcDispatch(null);
+        venusRpcTransport.mode="rich";
+        if(venusRpcGateway.active||venusRpcGatewayAuthorized()) venusRpcGatewayStop(true);
+        if(was&&venusRpcTransport.mode!=="kizzy") venusRpcDispatch(null);
         // An explicit stop clears the stored epoch. Logout/account switches
         // retain it for the same account, but never publish it to another.
         if(!settings.rpcEnabled){
@@ -191,16 +195,28 @@
         // a remote Discord client redraw its timer more frequently.
         const payload=JSON.stringify(built.activity);
         if(resumed && venusRpcTransport.active &&
+            venusRpcTransport.mode===p.sendMode &&
             venusRpcTransport.profileId===p.id &&
             venusRpcTransport.account===currentId() &&
             venusRpcTransport.lastPayload===payload)
             return {ok:true,skipped:true,error:""};
-        if(p.sendMode!=="compat") venusRpcWarmApplication(venusRpcAppId(p));
-        const success=venusRpcDispatch(built.activity);
-        if(!success) {
-            venusRpcTransport.error="Discord's local activity dispatcher is unavailable.";
+        let delivery={ok:false,error:""};
+        if(p.sendMode==="kizzy") {
+            // Remove the old local activity before starting the separate Gateway.
+            if(venusRpcTransport.active&&venusRpcTransport.mode!=="kizzy")
+                venusRpcDispatch(null);
+            delivery=venusRpcGatewayPublish(built.activity,start);
+        } else {
+            if(venusRpcGateway.active||venusRpcGatewayAuthorized())
+                venusRpcGatewayStop(true);
+            if(p.sendMode!=="compat") venusRpcWarmApplication(venusRpcAppId(p));
+            delivery={ok:!!venusRpcDispatch(built.activity),
+                error:"Discord's local activity dispatcher is unavailable."};
+        }
+        if(!delivery.ok) {
+            venusRpcTransport.error=delivery.error;
             notify("rpcEnabled");
-            return {ok:false,error:venusRpcTransport.error};
+            return {ok:false,error:delivery.error};
         }
         venusRpcTransport.active=true;
         venusRpcTransport.profileId=p.id;
@@ -209,6 +225,7 @@
         venusRpcTransport.lastSent=Date.now();
         venusRpcTransport.lastPayload=payload;
         venusRpcTransport.timeOffset=offset;
+        venusRpcTransport.mode=p.sendMode||"rich";
         venusRpcTransport.error="";
         if(!resumed || changedOffset || !venusRpcStoredStart()){
             setSetting("rpcStartedAt",start);
@@ -216,7 +233,7 @@
         }
         backgroundSync();
         notify("rpcEnabled");
-        return {ok:true,error:""};
+        return {ok:true,pending:!!delivery.pending,error:""};
     }
     function venusRpcSavedProfile() {
         return venusRpcProfiles().find(p=>p.id===settings.rpcSelected)||null;
@@ -226,6 +243,12 @@
         const p=venusRpcSavedProfile();
         if (!p) {
             venusRpcTransport.error="Saved RPC profile not found.";
+            notify("rpcEnabled");
+            return;
+        }
+        if(p.sendMode==="kizzy"&&!venusRpcGatewayAuthorized()){
+            // Never reconnect an independent user session silently after restart.
+            venusRpcTransport.error="Kizzy Gateway needs authorization after restarting Discord.";
             notify("rpcEnabled");
             return;
         }
