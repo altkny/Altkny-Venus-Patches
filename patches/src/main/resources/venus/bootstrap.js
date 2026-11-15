@@ -94,7 +94,7 @@
         reverseImageSearch: false, copyFileContents: false, replyTimestamp: false, imageDescriptions: false, channelPreview: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
         jumpToTop: false, hiddenChannels: false, hiddenChannelsMenu: true, pastelize:false, pastelAll:false, pastelContent:false, platformIndicators:false, piDmHeader:true, piUserList:true, piProfile:true, piHideMobile:true, reviewDB:false, reviewWarning:true, readAll:false, readAllMode:"guilds",
         quests:false, questsVideo:true, questsPlay:true, questsActivity:true, questsEnroll:true, questsDashboardAlerts:false, questsConcurrent:1,
-        customRpc:true, rpcEnabled:false, rpcProfiles:"[]", rpcSelected:"", badges:false, badgesGameTime:true, badgesUniqueGames:true, badgesCycleMinutes:15, badgesGamesAtOnce:2, systemFont:false, systemFontSource:"phone",
+        customRpc:true, rpcEnabled:false, rpcStartedAt:0, rpcAccountId:"", rpcProfiles:"[]", rpcSelected:"", badges:false, badgesGameTime:true, badgesUniqueGames:true, badgesCycleMinutes:15, badgesGamesAtOnce:2, systemFont:false, systemFontSource:"phone",
         systemEmoji:false, systemEmojiSource:"phone", gestures:false, gestureOwn:"edit", gestureTripleDelete:true,
         validUser:false, youBarSettings:false, splitMessages:false,
         translate:false, translateTarget:"discord", translateLanguage:"en", translateMode:"auto", translateAsk:"both", translateNote:true, translateOriginal:false, translateSkip:"",
@@ -112,7 +112,7 @@
             reverseImageSearch: false, copyFileContents: false, replyTimestamp: false, imageDescriptions: false, channelPreview: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
             jumpToTop: false, hiddenChannels: false, hiddenChannelsMenu: true, pastelize: false, pastelAll: false, pastelContent: false, platformIndicators: false, piDmHeader: true, piUserList: true, piProfile: true, piHideMobile: true, reviewDB: false, reviewWarning: true, readAll: false, readAllMode: "guilds",
             quests: false, questsVideo: true, questsPlay: true, questsActivity: true, questsEnroll: true, questsDashboardAlerts: false, questsConcurrent: 1,
-            customRpc: true, rpcEnabled: false, rpcProfiles: "[]", rpcSelected: "", badges: false, badgesGameTime: true, badgesUniqueGames: true, badgesCycleMinutes: 15, badgesGamesAtOnce: 2, systemFont: false, systemFontSource: "phone",
+            customRpc: true, rpcEnabled: false, rpcStartedAt: 0, rpcAccountId: "", rpcProfiles: "[]", rpcSelected: "", badges: false, badgesGameTime: true, badgesUniqueGames: true, badgesCycleMinutes: 15, badgesGamesAtOnce: 2, systemFont: false, systemFontSource: "phone",
             systemEmoji: false, systemEmojiSource: "phone", gestures: false, gestureOwn: "edit", gestureTripleDelete: true,
             validUser: false, youBarSettings: false, splitMessages: false,
             translate: false, translateTarget: "discord", translateLanguage: "en", translateMode: "auto", translateAsk: "both", translateNote: true, translateOriginal: false, translateSkip: "",
@@ -6171,6 +6171,10 @@
         }
         return {activity};
     }
+    function venusRpcStoredStart() {
+        const at=Number(settings.rpcStartedAt);
+        return Number.isFinite(at)&&at>0&&at<=Date.now() ? Math.floor(at) : 0;
+    }
     function venusRpcDispatch(activity) {
         return questDispatch({type:"LOCAL_ACTIVITY_UPDATE",socketId:VENUS_RPC_SOCKET,
             pid:VENUS_RPC_PID,activity:activity||null});
@@ -6181,14 +6185,23 @@
         venusRpcTransport.profileId=null;
         venusRpcTransport.startedAt=0;
         if(was) venusRpcDispatch(null);
+        // An explicit stop clears the stored epoch. Logout/account switches
+        // retain it for the same account, but never publish it to another.
+        if(!settings.rpcEnabled){
+            setSetting("rpcStartedAt",0);
+            setSetting("rpcAccountId","");
+        }
         backgroundSync();
         notify("rpcEnabled");
     }
     function venusRpcPublish(profile, resumed) {
         if(!features.customRpc) return {ok:false,error:"Custom RPC patch is not installed."};
         if(!currentId()) return {ok:false,error:"Sign in to Discord before publishing."};
+        if(resumed&&settings.rpcAccountId&&settings.rpcAccountId!==currentId())
+            return {ok:false,error:"This RPC timer belongs to another Discord account."};
         const p=venusRpcNormalize(profile);
-        const start=resumed && venusRpcTransport.startedAt ? venusRpcTransport.startedAt : Date.now();
+        const start=resumed ?
+            (venusRpcTransport.startedAt||venusRpcStoredStart()||Date.now()) : Date.now();
         const built=venusRpcBuildActivity(p,start);
         if(built.error) {
             venusRpcTransport.error=built.error;
@@ -6207,6 +6220,10 @@
         venusRpcTransport.account=currentId();
         venusRpcTransport.lastSent=Date.now();
         venusRpcTransport.error="";
+        if(!resumed || !venusRpcStoredStart()){
+            setSetting("rpcStartedAt",start);
+            setSetting("rpcAccountId",currentId());
+        }
         backgroundSync();
         notify("rpcEnabled");
         return {ok:true,error:""};
@@ -6279,8 +6296,50 @@
     }
     function venusRpcValidUrl(url) { return /^https:\/\/[^\s]+$/i.test(url); }
     function venusRpcTime(seconds) {
-        const n=Math.max(0,Math.floor(seconds)), h=Math.floor(n/3600), m=Math.floor(n%3600/60), s=n%60;
-        return (h ? h+":" : "")+String(m).padStart(h?2:1,"0")+":"+String(s).padStart(2,"0");
+        const n=Math.max(0,Math.floor(Number(seconds)||0)), h=Math.floor(n/3600), m=Math.floor(n%3600/60), s=n%60;
+        return String(h).padStart(2,"0")+":"+String(m).padStart(2,"0")+":"+String(s).padStart(2,"0");
+    }
+    // Always derive elapsed time from the original epoch. A delayed Android timer
+    // callback must never make the clock permanently fall behind.
+    function venusRpcElapsedSeconds(startedAt,now) {
+        return Number.isFinite(startedAt)&&startedAt>0 ?
+            Math.max(0,Math.floor((now-startedAt)/1000)) : 0;
+    }
+    function venusRpcNextClockDelay(startedAt,now) {
+        const elapsed=Math.max(0,now-startedAt);
+        return Math.max(40,1000-(elapsed%1000)+15);
+    }
+    function VenusRpcClock(props) {
+        // Dedicated component: updating the clock does not redraw the entire
+        // games catalog, its thumbnails and all editable text fields.
+        const [now,setNow]=React.useState(Date.now());
+        React.useEffect(()=>{
+            let mounted=true,handle=null,subscription=null;
+            const refresh=()=>{
+                if(!mounted) return;
+                if(handle!==null&&global.clearTimeout) global.clearTimeout(handle);
+                const current=Date.now();
+                setNow(current);
+                if(global.setTimeout)
+                    handle=global.setTimeout(refresh,venusRpcNextClockDelay(props.startedAt,current));
+            };
+            refresh();
+            // Android suspends JS timers in the background. Resync immediately
+            // when returning to the Discord settings page.
+            try {
+                if(RN&&RN.AppState&&typeof RN.AppState.addEventListener==="function")
+                    subscription=RN.AppState.addEventListener("change",state=>{
+                        if(state==="active") refresh();
+                    });
+            } catch (_) {}
+            return ()=>{
+                mounted=false;
+                if(handle!==null&&global.clearTimeout) global.clearTimeout(handle);
+                if(subscription&&typeof subscription.remove==="function") subscription.remove();
+            };
+        },[props.startedAt]);
+        return el(RN.Text,{style:{color:"#a7abb6",fontSize:12}},
+            venusRpcTime(venusRpcElapsedSeconds(props.startedAt,now))+" elapsed");
     }
     function VenusRpcCover(props) {
         const [failed,setFailed]=React.useState(false);
@@ -6302,7 +6361,6 @@
             venusRpcProfiles().find(x=>x.id===settings.rpcSelected) ||
             Object.assign({},VENUS_RPC_EMPTY,{name:"Minecraft",id:"minecraft"})));
         const [started,setStarted]=React.useState(Date.now());
-        const [tick,setTick]=React.useState(0);
         const [notice,setNotice]=React.useState("");
         const [search,setSearch]=React.useState("");
         const [visible,setVisible]=React.useState(12);
@@ -6332,11 +6390,6 @@
             },850);
             return ()=>{if(global.clearTimeout) global.clearTimeout(handle);};
         },[profile,liveSync,rpcRunning]);
-        React.useEffect(()=>{
-            if (!profile.elapsed) return;
-            const timer=global.setInterval?global.setInterval(()=>setTick(t=>t+1),1000):null;
-            return ()=>{if (timer !== null && global.clearInterval) global.clearInterval(timer);};
-        },[profile.elapsed]);
         if (!RN || !React) return null;
         const fg="#f2f3f5", muted="#a7abb6", line="#343842", panel="#262a34", accent="#7983f5";
         const text=(value,style)=>el(RN.Text,{style:Object.assign({color:fg,fontSize:14},style||{})},value);
@@ -6415,12 +6468,24 @@
             edit(venusRpcNormalize(VENUS_RPC_EMPTY));
             setNotice("Saved profile removed.");
         };
+        const resetTimer=()=>{
+            if(rpcRunning&&venusRpcTransport.profileId===profile.id){
+                const result=venusRpcPublish(profile,false);
+                if(!result.ok){setNotice(result.error);return;}
+                setStarted(venusRpcTransport.startedAt);
+                setNotice("Timer restarted in Discord and in the preview.");
+            } else {
+                setStarted(Date.now());
+                setNotice("Preview timer restarted.");
+            }
+        };
         const image=(p,small,size)=>el(VenusRpcCover,{
             key:(small?"small:":"cover:")+(venusRpcPreviewImage(p,small)||"none"),
             uri:venusRpcPreviewImage(p,small),size:size||64,circle:!!small,
             label:small?"?":(p.name||"GAME").slice(0,2).toUpperCase()
         });
-        const elapsed=profile.elapsed?venusRpcTime((Date.now()-(rpcRunning && venusRpcTransport.profileId===profile.id ? venusRpcTransport.startedAt : started))/1000):null;
+        const elapsedStart=rpcRunning&&venusRpcTransport.profileId===profile.id&&venusRpcTransport.startedAt ?
+            venusRpcTransport.startedAt : started;
         const preview=el(RN.View,{key:"preview",accessible:true,style:{borderRadius:16,
             backgroundColor:"#20232b",borderWidth:1,borderColor:"#414651",padding:15,gap:10}},
             el(RN.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}},
@@ -6435,7 +6500,7 @@
                     text(profile.name || "Custom Activity",{fontWeight:"700",fontSize:16}),
                     profile.details?text(profile.details,{fontSize:13}):null,
                     profile.state?text(profile.state,{color:muted,fontSize:12}):null,
-                    elapsed?text(elapsed+" elapsed",{color:muted,fontSize:12}):null)),
+                    profile.elapsed?el(VenusRpcClock,{startedAt:elapsedStart}):null)),
             profile.buttons.filter(b=>b.label&&venusRpcValidUrl(b.url)).map((b,i)=>
                 el(RN.View,{key:"previewbutton"+i,style:{backgroundColor:"#414651",
                     borderRadius:8,paddingVertical:9,alignItems:"center"}},
@@ -6540,7 +6605,7 @@
                 button("Publish activity",publishCurrent,true),
                 button("Stop publishing",stopCurrent,false),
                 button("Save profile",saveCurrent,false),
-                button("Reset timer",()=>setStarted(Date.now()),false),
+                button("Reset timer",resetTimer,false),
                 button("Delete saved",removeCurrent,false)),
             notice?text(notice,{color:"#e7c88a"}):null,
             text("Experimental: this sends a local activity event through the signed-in Discord client. No token is requested. External visibility, images and buttons are not guaranteed; Discord may reject the activity.",{color:muted,fontSize:12,lineHeight:18})
