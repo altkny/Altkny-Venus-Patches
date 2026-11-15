@@ -1,15 +1,56 @@
 // Custom Rich Presence UI for the existing Venus bootstrap closure.
-// Experimental publisher uses Discord's own in-client activity dispatcher.
+// Official game identities come from the Discord directory. Other apps are user-editable templates.
     const VENUS_RPC_GAMES = [
         "Minecraft","ROBLOX","VALORANT","Fortnite","Terraria","Stardew Valley",
         "Counter-Strike 2","League of Legends","Apex Legends","ELDEN RING",
         "Overwatch","Dota 2"
     ];
+    // Curated app examples: never invent application IDs or realtime metadata.
+    const VENUS_RPC_APPS = [
+        ["Spotify","Music",2,"Listening to music",""],
+        ["YouTube Music","Music",2,"Listening to music",""],
+        ["Apple Music","Music",2,"Listening to music",""],
+        ["SoundCloud","Music",2,"Listening to music",""],
+        ["Deezer","Music",2,"Listening to music",""],
+        ["TIDAL","Music",2,"Listening to music",""],
+        ["YouTube","Video",3,"Watching a video",""],
+        ["Netflix","Video",3,"Watching a show",""],
+        ["Prime Video","Video",3,"Watching a show",""],
+        ["Disney+","Video",3,"Watching a show",""],
+        ["Twitch","Video",3,"Watching a stream",""],
+        ["Crunchyroll","Video",3,"Watching anime",""],
+        ["Visual Studio Code","Development",0,"Working on a project","Editing code"],
+        ["Android Studio","Development",0,"Working on an Android project",""],
+        ["IntelliJ IDEA","Development",0,"Coding",""],
+        ["GitHub","Development",0,"Working on a repository",""],
+        ["Termux","Development",0,"Using the terminal",""],
+        ["Figma","Creative",0,"Designing",""],
+        ["Blender","Creative",0,"Creating 3D art",""],
+        ["CapCut","Creative",0,"Editing a video",""],
+        ["Krita","Creative",0,"Digital painting",""],
+        ["Canva","Creative",0,"Creating a design",""],
+        ["Obsidian","Productivity",0,"Writing notes",""],
+        ["Notion","Productivity",0,"Organizing a workspace",""],
+        ["Google Docs","Productivity",0,"Writing a document",""],
+        ["Google Chrome","Productivity",0,"Browsing the web",""],
+        ["Firefox","Productivity",0,"Browsing the web",""],
+        ["Discord","Social",0,"Chatting",""],
+        ["Telegram","Social",0,"Messaging",""],
+        ["WhatsApp","Social",0,"Messaging",""]
+    ];
+    const VENUS_RPC_CATEGORIES = ["All","Music","Video","Development","Creative","Productivity","Social"];
+    function venusRpcAppEntries() {
+        return VENUS_RPC_APPS.map(([name,category,type,details,state])=>({
+            id:"app:"+name.toLowerCase().replace(/[^a-z0-9]+/g,"-"),
+            name,category,type,details,state,source:"preset",applicationId:"",
+            elapsed:type===0
+        }));
+    }
     const VENUS_RPC_TYPES = [
         [0,"Playing"],[2,"Listening"],[3,"Watching"],[1,"Streaming"],[5,"Competing"]
     ];
     const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",applicationId:"",details:"",state:"",
-        iconHash:"",largeImage:"",smallImage:"",largeText:"",smallText:"",
+        iconHash:"",iconUrl:"",category:"Custom",largeImage:"",smallImage:"",largeText:"",smallText:"",
         type:0,streamUrl:"",sendMode:"rich",timeOffsetSeconds:0,
         elapsed:true,buttons:[{label:"",url:""},{label:"",url:""}]};
     function venusRpcClean(x,n) { return typeof x === "string" ? x.trim().slice(0,n || 128) : ""; }
@@ -20,6 +61,8 @@
             id:venusRpcClean(p.id,64) || "custom",
             applicationId:venusRpcClean(p.applicationId,20),
             iconHash:venusRpcClean(p.iconHash,40),
+            iconUrl:venusRpcClean(p.iconUrl,512),
+            category:venusRpcClean(p.category,32)||"Custom",
             name:venusRpcClean(p.name) || "Custom Activity",
             details:venusRpcClean(p.details),state:venusRpcClean(p.state),
             largeImage:venusRpcClean(p.largeImage,256),smallImage:venusRpcClean(p.smallImage,256),
@@ -36,7 +79,7 @@
     function venusRpcProfiles() {
         try {
             const a=JSON.parse(settings.rpcProfiles || "[]");
-            return Array.isArray(a) ? a.slice(0,32).map(venusRpcNormalize) : [];
+            return Array.isArray(a) ? a.slice(0,64).map(venusRpcNormalize) : [];
         } catch (_) { return []; }
     }
     function venusRpcValidUrl(url) { return /^https:\/\/[^\s]+$/i.test(url); }
@@ -90,14 +133,16 @@
         const [failed,setFailed]=React.useState(false);
         React.useEffect(()=>{setFailed(false);},[props.uri]);
         const size=props.size||64;
-        const radius=props.circle?size/2:12;
+        const radius=props.circle?size/2:14;
+        const tileColor=props.tint||"#363d50";
         return el(RN.View,{style:{height:size,width:size,borderRadius:radius,
-            backgroundColor:"#363d50",alignItems:"center",justifyContent:"center",overflow:"hidden"}},
+            backgroundColor:tileColor,alignItems:"center",justifyContent:"center",overflow:"hidden"}},
             props.uri&&!failed?el(RN.Image,{
                 source:{uri:props.uri},resizeMode:"cover",
                 onError:()=>setFailed(true),
                 style:{width:size,height:size,borderRadius:radius}
-            }):el(RN.Text,{style:{fontSize:size<40?10:12,color:"#d1d8ff",fontWeight:"700"}},
+            }):el(RN.Text,{style:{fontSize:size<40?10:Math.min(18,Math.round(size*0.28)),
+                color:"#eef0ff",fontWeight:"800",letterSpacing:0.5}},
                 props.label||"GAME"));
     }
     function venusRpcParseTime(value) {
@@ -117,7 +162,9 @@
         const [started,setStarted]=React.useState(Date.now());
         const [notice,setNotice]=React.useState("");
         const [search,setSearch]=React.useState("");
-        const [visible,setVisible]=React.useState(12);
+        const [library,setLibrary]=React.useState("games");
+        const [appCategory,setAppCategory]=React.useState("All");
+        const [visible,setVisible]=React.useState(16);
         const [liveSync,setLiveSync]=React.useState(true);
         const [gatewayToken,setGatewayToken]=React.useState("");
         const [gatewayConsent,setGatewayConsent]=React.useState(false);
@@ -130,7 +177,7 @@
         React.useEffect(()=>{
             let active=true;
             Promise.resolve().then(()=>venusRpcCatalogLoad(false)).catch(()=>{}).then(()=>{
-                if(active) setVisible(n=>Math.max(12,n));
+                if(active) setVisible(n=>Math.max(16,n));
             });
             return ()=>{active=false;};
         },[]);
@@ -174,11 +221,18 @@
                 text(label,{fontWeight:"600",color:selected?"#c5caff":fg,fontSize:13}));
         };
         const choose=(game)=>{
-            if(game&&game.id) venusRpcWarmApplication(game.id);
-            const saved=venusRpcProfiles().find(x=>x.id===game.id || x.applicationId===game.id);
-            const p=saved || venusRpcNormalize(Object.assign({},VENUS_RPC_EMPTY,{
-                id:game.id,applicationId:game.id,name:game.name,iconHash:game.icon||""
-            }));
+            if(game&&/^\d{17,20}$/.test(String(game.id||"")))
+                venusRpcWarmApplication(game.id);
+            const saved=venusRpcProfiles().find(x=>x.id===game.id ||
+                (game.applicationId&&x.applicationId===game.applicationId));
+            const preset=game&&game.source==="preset";
+            const keepGateway=venusRpcTransport.mode==="kizzy"&&venusRpcGatewayAuthorized();
+            const p=saved || venusRpcNormalize(Object.assign({},VENUS_RPC_EMPTY,
+                preset?game:{
+                    id:game.id,applicationId:game.id,name:game.name,
+                    iconHash:game.icon||"",category:"Game",
+                    sendMode:keepGateway?"kizzy":"rich"
+                },preset?{sendMode:keepGateway?"kizzy":"compat"}:{}));
             edit(p);
             setManualTime(venusRpcTime(p.timeOffsetSeconds));
             setStarted(Date.now()-p.timeOffsetSeconds*1000);
@@ -204,7 +258,7 @@
             if (invalid) {setNotice("Buttons need a label and a valid HTTPS link.");return;}
             const items=venusRpcProfiles().filter(x=>x.id!==p.id);
             items.unshift(p);
-            setSetting("rpcProfiles",JSON.stringify(items.slice(0,32)));
+            setSetting("rpcProfiles",JSON.stringify(items.slice(0,64)));
             setSetting("rpcSelected",p.id);
             edit(p);
             setNotice("Profile saved on this device.");
@@ -216,7 +270,7 @@
             if(!result.ok){setNotice(result.error);return false;}
             const items=venusRpcProfiles().filter(x=>x.id!==normalized.id);
             items.unshift(normalized);
-            setSetting("rpcProfiles",JSON.stringify(items.slice(0,32)));
+            setSetting("rpcProfiles",JSON.stringify(items.slice(0,64)));
             setSetting("rpcSelected",normalized.id);
             setSetting("rpcEnabled",true);
             backgroundSync();
