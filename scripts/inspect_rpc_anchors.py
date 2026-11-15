@@ -24,3 +24,8 @@ for idx in sorted(hits)[:85]:
  print("\n=== L",idx+1,"===")
  for n in range(max(0,idx-3),min(len(lines),idx+7)):
   print(f"{n+1}: {lines[n][:190]}")
+
+for a,b in [(92,125),(1200,1255),(1540,1695),(1760,1870)]:
+ print(f"\\n### FOCUSED RANGE {a}-{b} ###")
+ for n in range(a-1,min(len(lines),b)):
+  print(f"{n+1}: {lines[n][:210]}")
