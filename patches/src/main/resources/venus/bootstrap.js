@@ -32,6 +32,7 @@
     if (features.readAll) targetModules[17439] = 1;
     if (features.quests) selectModules([584, 7656, 10002, 14713, 14748]);
     if (features.badges) selectModules([584, 1392, 6015, 8590, 10002, 14713, 14748]);
+    if (features.customRpc) selectModules([584]);
     if (features.systemEmoji) targetModules[7098] = 1;
     if (features.gestures) selectModules([8254, 9738, 13762, 12935, 1392, 11114]);
     if (features.validUser) selectModules([584, 1392]);
@@ -93,7 +94,7 @@
         reverseImageSearch: false, copyFileContents: false, replyTimestamp: false, imageDescriptions: false, channelPreview: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
         jumpToTop: false, hiddenChannels: false, hiddenChannelsMenu: true, pastelize:false, pastelAll:false, pastelContent:false, platformIndicators:false, piDmHeader:true, piUserList:true, piProfile:true, piHideMobile:true, reviewDB:false, reviewWarning:true, readAll:false, readAllMode:"guilds",
         quests:false, questsVideo:true, questsPlay:true, questsActivity:true, questsEnroll:true, questsDashboardAlerts:false, questsConcurrent:1,
-        customRpc:true, rpcProfiles:"[]", rpcSelected:"", badges:false, badgesGameTime:true, badgesUniqueGames:true, badgesCycleMinutes:15, badgesGamesAtOnce:2, systemFont:false, systemFontSource:"phone",
+        customRpc:true, rpcEnabled:false, rpcProfiles:"[]", rpcSelected:"", badges:false, badgesGameTime:true, badgesUniqueGames:true, badgesCycleMinutes:15, badgesGamesAtOnce:2, systemFont:false, systemFontSource:"phone",
         systemEmoji:false, systemEmojiSource:"phone", gestures:false, gestureOwn:"edit", gestureTripleDelete:true,
         validUser:false, youBarSettings:false, splitMessages:false,
         translate:false, translateTarget:"discord", translateLanguage:"en", translateMode:"auto", translateAsk:"both", translateNote:true, translateOriginal:false, translateSkip:"",
@@ -111,7 +112,7 @@
             reverseImageSearch: false, copyFileContents: false, replyTimestamp: false, imageDescriptions: false, channelPreview: false, noTyping: false, quickDelete: false, noDelete: false, noDeleteSave: false, noDeleteLimit: 0, noDeleteEdits: true, noDeleteColor: "default", noDeleteBrightness: 50, noDeleteLogDeleted: true, noDeleteLogEdits: true, noDeleteLogOwn: false, noDeleteLogBots: false,
             jumpToTop: false, hiddenChannels: false, hiddenChannelsMenu: true, pastelize: false, pastelAll: false, pastelContent: false, platformIndicators: false, piDmHeader: true, piUserList: true, piProfile: true, piHideMobile: true, reviewDB: false, reviewWarning: true, readAll: false, readAllMode: "guilds",
             quests: false, questsVideo: true, questsPlay: true, questsActivity: true, questsEnroll: true, questsDashboardAlerts: false, questsConcurrent: 1,
-            customRpc: true, rpcProfiles: "[]", rpcSelected: "", badges: false, badgesGameTime: true, badgesUniqueGames: true, badgesCycleMinutes: 15, badgesGamesAtOnce: 2, systemFont: false, systemFontSource: "phone",
+            customRpc: true, rpcEnabled: false, rpcProfiles: "[]", rpcSelected: "", badges: false, badgesGameTime: true, badgesUniqueGames: true, badgesCycleMinutes: 15, badgesGamesAtOnce: 2, systemFont: false, systemFontSource: "phone",
             systemEmoji: false, systemEmojiSource: "phone", gestures: false, gestureOwn: "edit", gestureTripleDelete: true,
             validUser: false, youBarSettings: false, splitMessages: false,
             translate: false, translateTarget: "discord", translateLanguage: "en", translateMode: "auto", translateAsk: "both", translateNote: true, translateOriginal: false, translateSkip: "",
@@ -783,6 +784,7 @@
             }
             status.storage = "ready";
             debugLogReady();
+            if (features.customRpc) venusRpcLoaded();
             if (features.backgroundMedia) backgroundMediaStart();
             if (features.nitroThemes && settings.nitroThemes) nitroThemeRecheck();
             if ((features.nitroThemes || features.accountSwitcher) && nitroThemeHasAny()) later(nitroThemeReapply, 0);
@@ -6048,12 +6050,128 @@
     }
 // Custom Rich Presence UI for the existing Venus bootstrap closure.
 // Activity publisher is intentionally not claimed until a verified Android transport exists.
+// Experimental in-client activity transport. Reuses Discord's signed-in
+// dispatcher; never opens a second Gateway session or reads/stores user tokens.
+// A successful dispatch is NOT proof of visibility to other accounts.
+    const VENUS_RPC_SOCKET = "venus-custom-rpc";
+    const VENUS_RPC_PID = 20941;
+    const venusRpcTransport = {attached:false, connected:false, active:false,
+        startedAt:0, profileId:null, error:"", lastSent:0, account:null};
+    function venusRpcAppId(p) {
+        if (/^\d{17,20}$/.test(p.applicationId||"")) return p.applicationId;
+        const entries = typeof BADGE_FALLBACK_GAMES !== "undefined" ? BADGE_FALLBACK_GAMES : [];
+        const match = entries.find(g => {
+            const name = Array.isArray(g) ? g[1] : g && g.name;
+            return typeof name === "string" && name.toLowerCase() === (p.name||"").toLowerCase();
+        });
+        return match ? (Array.isArray(match) ? match[0] : match.id) : null;
+    }
+    function venusRpcBuildActivity(profile, startedAt) {
+        const p=venusRpcNormalize(profile), app=venusRpcAppId(p);
+        if (!app) return {error:"No registered Discord Application ID for this profile."};
+        if (!p.name) return {error:"An activity name is required."};
+        const buttons=p.buttons.filter(b=>b.label&&venusRpcValidUrl(b.url)).slice(0,2);
+        if (p.buttons.some(b=>(b.label||b.url)&&(!b.label||!venusRpcValidUrl(b.url))))
+            return {error:"Each button needs a name and a valid HTTPS URL."};
+        const activity={name:p.name,application_id:app,type:0,flags:0};
+        if(p.details) activity.details=p.details;
+        if(p.state) activity.state=p.state;
+        if(p.elapsed) activity.timestamps={start:startedAt};
+        // Discord may drop unsupported CDN/remote asset keys; the preview is
+        // intentionally independent and never claims that assets were accepted.
+        const assets={};
+        if(p.largeImage) assets.large_image=p.largeImage;
+        if(p.smallImage) assets.small_image=p.smallImage;
+        if(p.largeText) assets.large_text=p.largeText;
+        if(p.smallText) assets.small_text=p.smallText;
+        if(Object.keys(assets).length) activity.assets=assets;
+        if(buttons.length) {
+            activity.buttons=buttons.map(b=>b.label);
+            activity.metadata={button_urls:buttons.map(b=>b.url)};
+        }
+        return {activity};
+    }
+    function venusRpcDispatch(activity) {
+        return questDispatch({type:"LOCAL_ACTIVITY_UPDATE",socketId:VENUS_RPC_SOCKET,
+            pid:VENUS_RPC_PID,activity:activity||null});
+    }
+    function venusRpcClear() {
+        const was=venusRpcTransport.active;
+        venusRpcTransport.active=false;
+        venusRpcTransport.profileId=null;
+        venusRpcTransport.startedAt=0;
+        if(was) venusRpcDispatch(null);
+        backgroundSync();
+        notify("rpcEnabled");
+    }
+    function venusRpcPublish(profile, resumed) {
+        if(!features.customRpc) return {ok:false,error:"Custom RPC patch is not installed."};
+        if(!currentId()) return {ok:false,error:"Sign in to Discord before publishing."};
+        const p=venusRpcNormalize(profile);
+        const start=resumed && venusRpcTransport.startedAt ? venusRpcTransport.startedAt : Date.now();
+        const built=venusRpcBuildActivity(p,start);
+        if(built.error) {
+            venusRpcTransport.error=built.error;
+            notify("rpcEnabled");
+            return {ok:false,error:built.error};
+        }
+        const success=venusRpcDispatch(built.activity);
+        if(!success) {
+            venusRpcTransport.error="Discord's local activity dispatcher is unavailable.";
+            notify("rpcEnabled");
+            return {ok:false,error:venusRpcTransport.error};
+        }
+        venusRpcTransport.active=true;
+        venusRpcTransport.profileId=p.id;
+        venusRpcTransport.startedAt=start;
+        venusRpcTransport.account=currentId();
+        venusRpcTransport.lastSent=Date.now();
+        venusRpcTransport.error="";
+        backgroundSync();
+        notify("rpcEnabled");
+        return {ok:true,error:""};
+    }
+    function venusRpcSavedProfile() {
+        return venusRpcProfiles().find(p=>p.id===settings.rpcSelected)||null;
+    }
+    function venusRpcRestore() {
+        if(!features.customRpc || !settings.rpcEnabled || !currentId()) return;
+        const p=venusRpcSavedProfile();
+        if (!p) {
+            venusRpcTransport.error="Saved RPC profile not found.";
+            notify("rpcEnabled");
+            return;
+        }
+        venusRpcPublish(p,true);
+    }
+    function venusRpcLoaded() {
+        if(!features.customRpc) return;
+        // The dispatcher may not be initialized when settings are loaded.
+        later(venusRpcRestore,2500,false);
+    }
+    function venusRpcAttach(dispatcher) {
+        if(venusRpcTransport.attached || !dispatcher || typeof dispatcher.subscribe!=="function") return;
+        venusRpcTransport.attached=true;
+        dispatcher.subscribe("CONNECTION_OPEN", event=>{
+            const account=(event&&event.user&&event.user.id)||currentId();
+            if(venusRpcTransport.active && account!==venusRpcTransport.account) venusRpcClear();
+            venusRpcTransport.connected=true;
+            later(venusRpcRestore,1500,false);
+        });
+        dispatcher.subscribe("LOGOUT",()=>{
+            venusRpcClear();venusRpcTransport.connected=false;venusRpcTransport.account=null;
+        });
+        dispatcher.subscribe("MULTI_ACCOUNT_SWITCH_START",()=>{
+            venusRpcClear();venusRpcTransport.connected=false;venusRpcTransport.account=null;
+        });
+        if(currentId()) later(venusRpcRestore,1200,false);
+    }
     const VENUS_RPC_GAMES = [
         ["minecraft","Minecraft"], ["roblox","Roblox"], ["gtav","Grand Theft Auto V"],
         ["valorant","VALORANT"], ["fortnite","Fortnite"], ["genshin","Genshin Impact"],
         ["stardew","Stardew Valley"], ["terraria","Terraria"]
     ];
-    const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",details:"",state:"",
+    const VENUS_RPC_EMPTY = {id:"custom",name:"Custom Activity",applicationId:"",details:"",state:"",
         largeImage:"",smallImage:"",largeText:"",smallText:"",
         elapsed:true,buttons:[{label:"",url:""},{label:"",url:""}]};
     function venusRpcClean(x,n) { return typeof x === "string" ? x.trim().slice(0,n || 128) : ""; }
@@ -6062,6 +6180,7 @@
         const buttons = Array.isArray(p.buttons) ? p.buttons : [];
         return {
             id:venusRpcClean(p.id,64) || "custom",
+            applicationId:venusRpcClean(p.applicationId,20),
             name:venusRpcClean(p.name) || "Custom Activity",
             details:venusRpcClean(p.details),state:venusRpcClean(p.state),
             largeImage:venusRpcClean(p.largeImage,256),smallImage:venusRpcClean(p.smallImage,256),
@@ -6083,7 +6202,7 @@
         return (h ? h+":" : "")+String(m).padStart(h?2:1,"0")+":"+String(s).padStart(2,"0");
     }
     function VenusRpcSettings() {
-        useSettings("rpcProfiles"); useSettings("rpcSelected");
+        useSettings("rpcProfiles"); useSettings("rpcSelected"); useSettings("rpcEnabled");
         const [profile,edit]=React.useState(()=>venusRpcNormalize(
             venusRpcProfiles().find(x=>x.id===settings.rpcSelected) ||
             Object.assign({},VENUS_RPC_EMPTY,{name:"Minecraft",id:"minecraft"})));
@@ -6091,6 +6210,7 @@
         const [tick,setTick]=React.useState(0);
         const [notice,setNotice]=React.useState("");
         const [newId,setNewId]=React.useState("");
+        const rpcRunning=!!(settings.rpcEnabled && venusRpcTransport.active);
         React.useEffect(()=>{
             if (!profile.elapsed) return;
             const timer=global.setInterval?global.setInterval(()=>setTick(t=>t+1),1000):null;
@@ -6139,9 +6259,28 @@
             edit(p);
             setNotice("Profile saved on this device.");
         };
+        const publishCurrent=()=>{
+            const p=venusRpcNormalize(profile);
+            const result=venusRpcPublish(p,false);
+            if (!result.ok) {setNotice(result.error);return;}
+            const items=venusRpcProfiles().filter(x=>x.id!==p.id);
+            items.unshift(p);
+            setSetting("rpcProfiles",JSON.stringify(items.slice(0,32)));
+            setSetting("rpcSelected",p.id);
+            setSetting("rpcEnabled",true);
+            edit(p);
+            setStarted(venusRpcTransport.startedAt);
+            setNotice("Activity sent to Discord's local dispatcher. External visibility is not yet verified.");
+        };
+        const stopCurrent=()=>{
+            setSetting("rpcEnabled",false);
+            venusRpcClear();
+            setNotice("Activity stopped.");
+        };
         const removeCurrent=()=>{
             const items=venusRpcProfiles().filter(x=>x.id!==profile.id);
             setSetting("rpcProfiles",JSON.stringify(items));
+            if(settings.rpcSelected===profile.id) stopCurrent();
             setSetting("rpcSelected","");
             edit(venusRpcNormalize(VENUS_RPC_EMPTY));
             setNotice("Saved profile removed.");
@@ -6152,7 +6291,7 @@
             return el(RN.Image,{source:{uri:url},resizeMode:"cover",
                 style:{height:small?28:64,width:small?28:64,borderRadius:small?14:12}});
         };
-        const elapsed=profile.elapsed?venusRpcTime((Date.now()-started)/1000):null;
+        const elapsed=profile.elapsed?venusRpcTime((Date.now()-(rpcRunning && venusRpcTransport.profileId===profile.id ? venusRpcTransport.startedAt : started))/1000):null;
         const preview=el(RN.View,{key:"preview",accessible:true,style:{borderRadius:16,
             backgroundColor:"#20232b",borderWidth:1,borderColor:"#414651",padding:15,gap:10}},
             text("PROFILE PREVIEW",{fontSize:11,color:muted,fontWeight:"700",letterSpacing:1}),
@@ -6170,7 +6309,10 @@
                 el(RN.View,{key:"previewbutton"+i,style:{backgroundColor:"#414651",
                     borderRadius:8,paddingVertical:9,alignItems:"center"}},
                     text(b.label,{fontSize:13,fontWeight:"600"}))),
-            text("Preview only. Not published to your Discord profile.",{fontSize:11,color:"#e7c88a"}));
+            text(rpcRunning && venusRpcTransport.profileId===profile.id ?
+                "Sent to local Discord activity dispatcher. Check another account to verify." :
+                "Preview only. This profile is not currently active.",
+                {fontSize:11,color:"#e7c88a"}));
         const presets=el(RN.View,{key:"presets",style:{flexDirection:"row",flexWrap:"wrap",gap:7}},
             VENUS_RPC_GAMES.map(game=>button(game[1],()=>choose(game[0],game[1]),
                 profile.id===game[0],game[0])),
@@ -6199,6 +6341,7 @@
             savedRows,
             text("Edit activity",{fontSize:15,fontWeight:"700"}),
             field("Activity name","name","Minecraft"),
+            field("Discord Application ID","applicationId","Optional for recognized game presets",20),
             field("Details","details","Exploring the Overworld"),
             field("State","state","In a world"),
             field("Large image URL (HTTPS)","largeImage","https://example.com/image.png",256),
@@ -6211,11 +6354,13 @@
             text("Optional links",{fontSize:15,fontWeight:"700"}),
             ...buttons,
             el(RN.View,{key:"actions",style:{flexDirection:"row",flexWrap:"wrap",gap:8}},
-                button("Save profile",saveCurrent,true),
+                button("Publish activity",publishCurrent,true),
+                button("Stop publishing",stopCurrent,false),
+                button("Save profile",saveCurrent,false),
                 button("Reset timer",()=>setStarted(Date.now()),false),
                 button("Delete saved",removeCurrent,false)),
             notice?text(notice,{color:"#e7c88a"}):null,
-            text("Real publishing requires a verified Android RPC transport and a registered Discord application ID. No account token is collected or stored.",{color:muted,fontSize:12,lineHeight:18})
+            text("Experimental: this sends a local activity event through the signed-in Discord client. No token is requested. External visibility, images and buttons are not guaranteed; Discord may reject the activity.",{color:muted,fontSize:12,lineHeight:18})
         ];
         return el(RN.ScrollView,{key:"venusRpcEditor",keyboardShouldPersistTaps:"handled",
             contentContainerStyle:{padding:16,paddingBottom:40,gap:12}},...sections);
@@ -12614,7 +12759,8 @@
         const questBusy = !!(enabled("quests") && (quest.running || quest.enrolling));
         const badgeBusy = !!(enabled("badges") && (badges.current && badgeNeedsGame() || badges.granting));
         const pushListening = !!(settings.userNotifPush && userNotifHasTargets()) || removedPushing();
-        const needed = questBusy || badgeBusy || pushListening;
+        const rpcBusy = !!(features.customRpc && settings.rpcEnabled && venusRpcTransport.active);
+        const needed = questBusy || badgeBusy || rpcBusy || pushListening;
         if (needed) unpauseGateway();
         const fg = bgKeepAlive.fg || inspectedExport(10002, "default");
         if (!needed) {
@@ -12627,7 +12773,9 @@
         const content = questBusy && quest.running ? tr("Now: {name}.", {name:quest.running.name}) :
             questBusy ? tr("Quest Completer") :
             badgeBusy && badges.current ? tr("Playing {name}", {name:badges.current.game.name}) :
-            badgeBusy ? tr("Completing badges") : tr("Activity notifications");
+            badgeBusy ? tr("Completing badges") :
+            rpcBusy ? tr("Sharing {name}",{name:venusRpcSavedProfile()?.name || "activity"}) :
+            tr("Activity notifications");
         if (bgKeepAlive.active && bgKeepAlive.title === title && bgKeepAlive.content === content && fg) return;
         if (fg && typeof fg.updateServiceHandler === "function") {
             bgKeepAlive.active = true; bgKeepAlive.title = title; bgKeepAlive.content = content;
@@ -23512,6 +23660,7 @@ const venusQolPostMenu = venusQolChannelPreviewHook(()=>"ForumPostLongPressActio
                 if (features.validUser && exports && exports.default) validInit(exports.default);
                 if (features.quests) questsInit(exports.default);
                 if (features.badges && exports && exports.default) badgesInit(exports.default);
+                if (features.customRpc && exports && exports.default) venusRpcAttach(exports.default);
                 if ((features.nitroThemes || features.accountSwitcher) && exports && exports.default) nitroThemeAttach(exports.default);
                 if (features.bulkDelete && exports && exports.default) bulkDeleteInit(exports.default);
                 if (features.expandBar && exports && exports.default) expandBarInit(exports.default);
