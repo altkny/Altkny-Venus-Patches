@@ -5,14 +5,94 @@
     const VENUS_RPC_PID = 20941;
     const venusRpcTransport = {attached:false, connected:false, active:false,
         startedAt:0, profileId:null, error:"", lastSent:0, account:null};
+    // Discord's own detectable games directory, loaded on demand only.
+    // A search result always carries its real Discord application ID and icon hash.
+    const venusRpcCatalog = {games:null,loading:null,at:0,error:"",source:"fallback"};
+    function venusRpcFallbackGames() {
+        const entries=typeof BADGE_FALLBACK_GAMES!=="undefined" ? BADGE_FALLBACK_GAMES : [];
+        return entries.map(item=>{
+            const id=Array.isArray(item)?item[0]:item&&item.id;
+            const name=Array.isArray(item)?item[1]:item&&item.name;
+            const icon=Array.isArray(item)?item[4]:item&&(item.icon_hash||item.icon);
+            return {id:String(id||""),name:String(name||""),icon:String(icon||"")};
+        }).filter(g=>/^\d{17,20}$/.test(g.id)&&g.name);
+    }
+    function venusRpcOfficialIcon(id,hash,size) {
+        return /^\d{17,20}$/.test(String(id||"")) &&
+            /^(?:a_)?[0-9a-f]{32}$/i.test(String(hash||""))
+            ? "https://cdn.discordapp.com/app-icons/"+id+"/"+hash+".png?size="+(size||128)
+            : "";
+    }
+    function venusRpcGameFromServer(raw) {
+        if(!raw||typeof raw!=="object") return null;
+        const id=String(raw.id||"");
+        const name=typeof raw.name==="string"?raw.name.trim():"";
+        if(!/^\d{17,20}$/.test(id)||!name||name.length>128) return null;
+        if(raw.type!=null&&raw.type!==0&&raw.type!==5) return null;
+        const icon=String(raw.icon_hash||raw.icon||"");
+        return {id,name,icon:/^(?:a_)?[0-9a-f]{32}$/i.test(icon)?icon:""};
+    }
+    function venusRpcKnownGames() { return venusRpcCatalog.games||venusRpcFallbackGames(); }
+    function venusRpcGameForProfile(p) {
+        const app=String(p&&p.applicationId||"");
+        const name=String(p&&p.name||"").toLowerCase();
+        const games=venusRpcKnownGames();
+        return games.find(g=>g.id===app)||
+            (!app&&games.find(g=>g.name.toLowerCase()===name))||null;
+    }
+    function venusRpcCatalogLoad(force) {
+        if(!force&&venusRpcCatalog.games&&Date.now()-venusRpcCatalog.at<6*3600000)
+            return Promise.resolve(venusRpcCatalog.games);
+        if(venusRpcCatalog.loading) return venusRpcCatalog.loading;
+        const account=currentId();
+        venusRpcCatalog.error="";
+        venusRpcCatalog.loading=(async()=>{
+            let games=null;
+            try{
+                if(!account) throw new Error("Sign in to Discord to load the game directory.");
+                const response=await questRequest("/games/detectable",undefined,false,"get",
+                    ()=>currentId()===account);
+                const body=response&&response.body;
+                if(!Array.isArray(body)||body.length<100)
+                    throw new Error("The Discord detectable games directory is unavailable.");
+                const ids=new Set(),result=[];
+                for(const raw of body){
+                    const game=venusRpcGameFromServer(raw);
+                    if(game&&!ids.has(game.id)){ids.add(game.id);result.push(game);}
+                }
+                if(result.length<100) throw new Error("Discord returned an incomplete game list.");
+                games=result.sort((a,b)=>a.name.localeCompare(b.name));
+                venusRpcCatalog.source="discord";
+            }catch(e){
+                venusRpcCatalog.error=String(e&&e.message||e||"Directory unavailable").slice(0,150);
+                games=venusRpcCatalog.games||venusRpcFallbackGames();
+                venusRpcCatalog.source=venusRpcCatalog.games?"cached":"fallback";
+            }
+            venusRpcCatalog.games=games;
+            venusRpcCatalog.at=Date.now();
+            venusRpcCatalog.loading=null;
+            notify("rpcCatalog");
+            return games;
+        })();
+        return venusRpcCatalog.loading;
+    }
+    function venusRpcPreviewImage(profile,small) {
+        const p=profile||{},candidate=small?p.smallImage:p.largeImage;
+        if(venusRpcValidUrl(candidate)) return candidate;
+        const app=venusRpcAppId(p);
+        // Rich Presence assets may be numeric application asset IDs.
+        if(/^\d{17,20}$/.test(String(candidate||""))&&app)
+            return "https://cdn.discordapp.com/app-assets/"+app+"/"+candidate+".png?size=256";
+        if(!small){
+            const known=venusRpcGameForProfile(p);
+            return venusRpcOfficialIcon(app,p.iconHash||(known&&known.icon),256);
+        }
+        return "";
+    }
     function venusRpcAppId(p) {
-        if (/^\d{17,20}$/.test(p.applicationId||"")) return p.applicationId;
-        const entries = typeof BADGE_FALLBACK_GAMES !== "undefined" ? BADGE_FALLBACK_GAMES : [];
-        const match = entries.find(g => {
-            const name = Array.isArray(g) ? g[1] : g && g.name;
-            return typeof name === "string" && name.toLowerCase() === (p.name||"").toLowerCase();
-        });
-        return match ? (Array.isArray(match) ? match[0] : match.id) : null;
+        if (/^\d{17,20}$/.test(String(p&&p.applicationId||""))) return p.applicationId;
+        const known=venusRpcGameForProfile(p);
+        return known?known.id:null;
     }
     function venusRpcBuildActivity(profile, startedAt) {
         const p=venusRpcNormalize(profile), app=venusRpcAppId(p);
