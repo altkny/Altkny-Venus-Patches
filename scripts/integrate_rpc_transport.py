@@ -82,6 +82,12 @@ if 'const rpcBusy = !!(features.customRpc && settings.rpcEnabled && venusRpcTran
     replace_once('        const needed = questBusy || badgeBusy || pushListening;',
         '        const rpcBusy = !!(features.customRpc && settings.rpcEnabled && venusRpcTransport.active);\n'
         '        const needed = questBusy || badgeBusy || rpcBusy || pushListening;')
+# Keep the host's existing foreground service while explicitly opted-in
+# app usage detection is active. No service is started without the user's toggle.
+if 'const detectionBusy = !!(features.customRpc && settings.rpcDetectionEnabled && venusRpcDetection.active);' not in s:
+    replace_once('        const needed = questBusy || badgeBusy || rpcBusy || pushListening;',
+        '        const detectionBusy = !!(features.customRpc && settings.rpcDetectionEnabled && venusRpcDetection.active);\n'
+        '        const needed = questBusy || badgeBusy || rpcBusy || detectionBusy || pushListening;')
 if 'rpcBusy ? tr("Sharing {name}"' not in s:
     replace_once('            badgeBusy ? tr("Completing badges") : tr("Activity notifications");',
         '            badgeBusy ? tr("Completing badges") :\n'
