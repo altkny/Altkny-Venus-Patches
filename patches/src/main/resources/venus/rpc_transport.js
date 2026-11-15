@@ -119,6 +119,10 @@
         }
         return {activity};
     }
+    function venusRpcStoredStart() {
+        const at=Number(settings.rpcStartedAt);
+        return Number.isFinite(at)&&at>0&&at<=Date.now() ? Math.floor(at) : 0;
+    }
     function venusRpcDispatch(activity) {
         return questDispatch({type:"LOCAL_ACTIVITY_UPDATE",socketId:VENUS_RPC_SOCKET,
             pid:VENUS_RPC_PID,activity:activity||null});
@@ -129,14 +133,23 @@
         venusRpcTransport.profileId=null;
         venusRpcTransport.startedAt=0;
         if(was) venusRpcDispatch(null);
+        // An explicit stop clears the stored epoch. Logout/account switches
+        // retain it for the same account, but never publish it to another.
+        if(!settings.rpcEnabled){
+            setSetting("rpcStartedAt",0);
+            setSetting("rpcAccountId","");
+        }
         backgroundSync();
         notify("rpcEnabled");
     }
     function venusRpcPublish(profile, resumed) {
         if(!features.customRpc) return {ok:false,error:"Custom RPC patch is not installed."};
         if(!currentId()) return {ok:false,error:"Sign in to Discord before publishing."};
+        if(resumed&&settings.rpcAccountId&&settings.rpcAccountId!==currentId())
+            return {ok:false,error:"This RPC timer belongs to another Discord account."};
         const p=venusRpcNormalize(profile);
-        const start=resumed && venusRpcTransport.startedAt ? venusRpcTransport.startedAt : Date.now();
+        const start=resumed ?
+            (venusRpcTransport.startedAt||venusRpcStoredStart()||Date.now()) : Date.now();
         const built=venusRpcBuildActivity(p,start);
         if(built.error) {
             venusRpcTransport.error=built.error;
@@ -155,6 +168,10 @@
         venusRpcTransport.account=currentId();
         venusRpcTransport.lastSent=Date.now();
         venusRpcTransport.error="";
+        if(!resumed || !venusRpcStoredStart()){
+            setSetting("rpcStartedAt",start);
+            setSetting("rpcAccountId",currentId());
+        }
         backgroundSync();
         notify("rpcEnabled");
         return {ok:true,error:""};
