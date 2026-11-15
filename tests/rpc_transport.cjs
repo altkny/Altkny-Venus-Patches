@@ -13,10 +13,15 @@ const ctx={
   venusRpcNormalize:p=>({
     ...p,
     applicationId:p.applicationId||"",
+    sendMode:p.sendMode||"rich",
     name:p.name||"",
     buttons:Array.isArray(p.buttons)?p.buttons:[],
   }),
   venusRpcValidUrl:url=>/^https:\/\/[^\s]+$/i.test(url),
+  venusRpcGateway:{active:false},
+  venusRpcGatewayAuthorized:()=>false,
+  venusRpcGatewayStop:()=>{},
+  venusRpcGatewayPublish:()=>({ok:false,error:"Not authorized"}),
   venusRpcProfiles:()=>[],
   questRequest:async()=>({body:Array.from({length:165},(_,i)=>({
     id:String(1400000000000000000n+BigInt(i)),
@@ -49,6 +54,9 @@ assert.equal(compatibility.error,undefined);
 assert.equal(compatibility.activity.type,3);
 assert.equal(Object.hasOwn(compatibility.activity,"application_id"),false);
 assert.equal(compatibility.activity.timestamps.start,1700000000000);
+const gatewayBuilt=rpc.build({id:"newgame",name:"Missing game",sendMode:"kizzy",elapsed:true,buttons:[]},1700000000000);
+assert.equal(gatewayBuilt.activity.application_id,"962990036020756480");
+assert.equal(gatewayBuilt.activity.timestamps.start,1700000000000);
 const listening=rpc.build({...game,type:2},1700000000000);
 assert.equal(listening.activity.type,2);
 const streaming=rpc.build({...game,type:1,streamUrl:"https://twitch.tv/test"},1700000000000);
