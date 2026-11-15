@@ -6150,6 +6150,19 @@
         const known=venusRpcGameForProfile(p);
         return known?known.id:null;
     }
+    function venusRpcWarmApplication(id) {
+        // Badge Completer uses the same application metadata fetch. It helps
+        // the native Discord activity store resolve games from its directory.
+        // Unknown/unregistered applications may still be rejected.
+        if(!/^\d{17,20}$/.test(String(id||""))) return false;
+        try {
+            const fetch=inspectedExport(6357,"fetchApplication");
+            if(typeof fetch!=="function") return false;
+            const result=fetch(id);
+            if(result&&typeof result.catch==="function") result.catch(()=>{});
+            return true;
+        }catch(_){return false;}
+    }
     function venusRpcBuildActivity(profile, startedAt) {
         const p=venusRpcNormalize(profile), app=venusRpcAppId(p);
         if (!app && p.sendMode!=="compat") return {error:"This game needs an Application ID. Try Compatibility mode."};
@@ -6237,6 +6250,7 @@
             venusRpcTransport.account===currentId() &&
             venusRpcTransport.lastPayload===payload)
             return {ok:true,skipped:true,error:""};
+        if(p.sendMode!=="compat") venusRpcWarmApplication(venusRpcAppId(p));
         const success=venusRpcDispatch(built.activity);
         if(!success) {
             venusRpcTransport.error="Discord's local activity dispatcher is unavailable.";
@@ -6468,6 +6482,7 @@
                 text(label,{fontWeight:"600",color:selected?"#c5caff":fg,fontSize:13}));
         };
         const choose=(game)=>{
+            if(game&&game.id) venusRpcWarmApplication(game.id);
             const saved=venusRpcProfiles().find(x=>x.id===game.id || x.applicationId===game.id);
             const p=saved || venusRpcNormalize(Object.assign({},VENUS_RPC_EMPTY,{
                 id:game.id,applicationId:game.id,name:game.name,iconHash:game.icon||""
