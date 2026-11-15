@@ -6056,7 +6056,8 @@
     const VENUS_RPC_SOCKET = "venus-custom-rpc";
     const VENUS_RPC_PID = 20941;
     const venusRpcTransport = {attached:false, connected:false, active:false,
-        startedAt:0, profileId:null, error:"", lastSent:0, account:null};
+        startedAt:0, profileId:null, error:"", lastSent:0, account:null,
+        lastPayload:null};
     // Discord's own detectable games directory, loaded on demand only.
     // A search result always carries its real Discord application ID and icon hash.
     const venusRpcCatalog = {games:null,loading:null,at:0,error:"",source:"fallback"};
@@ -6184,6 +6185,7 @@
         venusRpcTransport.active=false;
         venusRpcTransport.profileId=null;
         venusRpcTransport.startedAt=0;
+        venusRpcTransport.lastPayload=null;
         if(was) venusRpcDispatch(null);
         // An explicit stop clears the stored epoch. Logout/account switches
         // retain it for the same account, but never publish it to another.
@@ -6208,6 +6210,15 @@
             notify("rpcEnabled");
             return {ok:false,error:built.error};
         }
+        // The original start timestamp remains unchanged. Duplicate local
+        // dispatches only refresh activity unnecessarily; they cannot make
+        // a remote Discord client redraw its timer more frequently.
+        const payload=JSON.stringify(built.activity);
+        if(resumed && venusRpcTransport.active &&
+            venusRpcTransport.profileId===p.id &&
+            venusRpcTransport.account===currentId() &&
+            venusRpcTransport.lastPayload===payload)
+            return {ok:true,skipped:true,error:""};
         const success=venusRpcDispatch(built.activity);
         if(!success) {
             venusRpcTransport.error="Discord's local activity dispatcher is unavailable.";
@@ -6219,6 +6230,7 @@
         venusRpcTransport.startedAt=start;
         venusRpcTransport.account=currentId();
         venusRpcTransport.lastSent=Date.now();
+        venusRpcTransport.lastPayload=payload;
         venusRpcTransport.error="";
         if(!resumed || !venusRpcStoredStart()){
             setSetting("rpcStartedAt",start);
@@ -6252,6 +6264,9 @@
         dispatcher.subscribe("CONNECTION_OPEN", event=>{
             const account=(event&&event.user&&event.user.id)||currentId();
             if(venusRpcTransport.active && account!==venusRpcTransport.account) venusRpcClear();
+            // Re-register the activity on a new connection, but suppress
+            // repetitive restore calls while the same connection is active.
+            if(!venusRpcTransport.connected) venusRpcTransport.lastPayload=null;
             venusRpcTransport.connected=true;
             later(venusRpcRestore,1500,false);
         });
