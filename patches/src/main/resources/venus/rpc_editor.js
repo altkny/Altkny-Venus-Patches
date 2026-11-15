@@ -359,7 +359,7 @@
         const savedRows=saved.length?el(RN.View,{key:"saved",style:{gap:8}},
             text("Saved profiles",{fontSize:15,fontWeight:"700"}),
             el(RN.View,{style:{flexDirection:"row",flexWrap:"wrap",gap:7}},
-                saved.map(p=>button(p.name,()=>choose(p.id,p.name),p.id===profile.id,p.id+"saved")))):null;
+                saved.map(p=>button(p.name,()=>choose(p),p.id===profile.id,p.id+"saved")))):null;
         const buttons=[0,1].map(i=>el(RN.View,{key:"custombutton"+i,style:{gap:6,marginVertical:4}},
             text("Button "+(i+1),{fontSize:13,fontWeight:"700"}),
             el(RN.TextInput,{accessibilityLabel:"Button "+(i+1)+" label",value:profile.buttons[i].label,
@@ -371,37 +371,105 @@
                 autoCapitalize:"none",autoCorrect:false,keyboardType:"url",
                 style:{color:fg,backgroundColor:"#171a21",padding:10,borderRadius:10},
                 onChangeText:value=>updateButton(i,"url",value)})));
-        const sections=[
-            el(RN.View,{key:"title",style:{gap:5}},text("Custom Rich Presence",{fontSize:20,fontWeight:"700"}),
-                text("Game presets, custom profiles and an instant Discord-style preview.",{color:muted})),
-            preview,
-            text("Choose a game",{fontSize:16,fontWeight:"700"}),presets,
-            savedRows,
-            text("Edit activity",{fontSize:15,fontWeight:"700"}),
+        const menu=el(RN.View,{key:"navigation",style:{flexDirection:"row",gap:7}},
+            [["games","Games"],["editor","Customize"],["send","Publication"]].map(([id,label])=>
+                el(RN.Pressable,{key:id,onPress:()=>setTab(id),accessibilityRole:"tab",
+                    accessibilityState:{selected:tab===id},
+                    style:{flex:1,alignItems:"center",paddingVertical:12,borderRadius:12,
+                        borderColor:tab===id?"#9aa3ff":"#414552",borderWidth:1,
+                        backgroundColor:tab===id?"#505c9a":"#272b37"}},
+                    text(label,{fontSize:12,fontWeight:tab===id?"700":"500"}))));
+        const elapsedPicker=el(RN.View,{key:"elapsedPicker",style:{gap:9}},
+            el(RN.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}},
+                text("Show elapsed time",{fontSize:13,fontWeight:"600"}),
+                el(RN.Switch,{value:profile.elapsed,onValueChange:v=>
+                    edit(p=>Object.assign({},p,{elapsed:v}))})),
+            text("Start at a custom elapsed time",{fontSize:12,color:muted}),
+            el(RN.View,{style:{flexDirection:"row",gap:8,alignItems:"center"}},
+                el(RN.TextInput,{accessibilityLabel:"Elapsed time HH:MM:SS",
+                    value:manualTime,onChangeText:setManualTime,placeholder:"HH:MM:SS",
+                    placeholderTextColor:muted,autoCorrect:false,keyboardType:"numbers-and-punctuation",
+                    style:{flex:1,color:fg,backgroundColor:"#171a21",borderColor:line,
+                        borderWidth:1,padding:11,borderRadius:10}}),
+                button("Apply",applyManualTime,false,"applyElapsed")),
+            text("Example: 02:30:00 starts the activity at 2 hours and 30 minutes. Maximum: 168 hours.",
+                {fontSize:11,color:muted}),
+            el(RN.View,{style:{flexDirection:"row",gap:7,flexWrap:"wrap"}},
+                button("Start now",resetTimer,false,"resetElapsed"),
+                button("+5 minutes",()=>{
+                    const base=venusRpcParseTime(manualTime)||0;
+                    setManualTime(venusRpcTime(Math.min(7*86400,base+300)));
+                },false,"timePlus5"),
+                button("+1 hour",()=>{
+                    const base=venusRpcParseTime(manualTime)||0;
+                    setManualTime(venusRpcTime(Math.min(7*86400,base+3600)));
+                },false,"timePlus1h")));
+        const editor=el(RN.View,{key:"editorTab",style:{gap:10}},
+            text("Activity type",{fontSize:17,fontWeight:"700"}),
+            typePicker,
+            text("Game and status",{fontSize:16,fontWeight:"700"}),
             field("Activity name","name","Minecraft"),
-            field("Discord Application ID","applicationId","Optional for recognized game presets",20),
             field("Details","details","Exploring the Overworld"),
             field("State","state","In a world"),
-            field("Large image URL (HTTPS)","largeImage","https://example.com/image.png",256),
-            field("Large image hint","largeText","Cover art"),
-            field("Small image URL (HTTPS)","smallImage","https://example.com/icon.png",256),
-            field("Small image hint","smallText","Icon"),
-            el(RN.View,{key:"timer",style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingVertical:6}},
-                text("Elapsed-time counter"),
-                el(RN.Switch,{value:profile.elapsed,onValueChange:v=>{edit(p=>Object.assign({},p,{elapsed:v}));setStarted(Date.now());}})),
-            el(RN.View,{key:"liveSync",style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center",paddingVertical:6}},
-                text("Auto-sync changes while active"),
+            profile.type===1?field("Streaming URL","streamUrl","https://twitch.tv/channel",512):null,
+            text("Activity timer",{fontSize:16,fontWeight:"700"}),elapsedPicker,
+            text("Artwork",{fontSize:16,fontWeight:"700"}),
+            field("Large image URL or asset ID","largeImage","https://example.com/art.png",256),
+            field("Large image description","largeText","Cover art"),
+            field("Small image URL or asset ID","smallImage","https://example.com/icon.png",256),
+            field("Small image description","smallText","Icon"),
+            text("Activity buttons",{fontSize:16,fontWeight:"700"}),
+            ...buttons);
+        const sending=el(RN.View,{key:"sendingTab",style:{gap:10}},
+            text("How activity is sent",{fontSize:18,fontWeight:"700"}),
+            deliveryPicker,
+            text("Discord application",{fontSize:16,fontWeight:"700"}),
+            field("Application ID","applicationId","Enter the game's registered ID",20),
+            text("A game in the searchable directory is not necessarily publishable as Rich Presence. Discord may filter unsupported applications.",
+                {fontSize:12,color:muted,lineHeight:18}),
+            el(RN.View,{style:{flexDirection:"row",alignItems:"center",justifyContent:"space-between"}},
+                text("Sync edits automatically",{fontSize:13,fontWeight:"600"}),
                 el(RN.Switch,{value:liveSync,onValueChange:setLiveSync})),
-            text("Optional links",{fontSize:15,fontWeight:"700"}),
-            ...buttons,
+            text("Automatic synchronization sends only changed payloads. The timestamp stays unchanged unless you edit the timer.",
+                {fontSize:12,color:muted,lineHeight:18}),
+            text("Connection diagnostics",{fontSize:16,fontWeight:"700"}),
+            text("Sender: local Discord activity dispatcher",{fontSize:12,color:muted}),
+            text("Last dispatch: "+(venusRpcTransport.lastSent?
+                new Date(venusRpcTransport.lastSent).toLocaleTimeString():"Not sent yet"),
+                {fontSize:12,color:muted}),
+            text("Result: "+(venusRpcTransport.error||"No local error detected"),
+                {fontSize:12,color:venusRpcTransport.error?"#ffbcab":muted}),
+            button("Switch to compatibility and publish",()=>{
+                const p=venusRpcNormalize(Object.assign({},profile,{sendMode:"compat"}));
+                edit(p);
+                const result=venusRpcPublish(p,false);
+                if(!result.ok){setNotice(result.error);return;}
+                const profiles=venusRpcProfiles().filter(x=>x.id!==p.id);
+                profiles.unshift(p);
+                setSetting("rpcProfiles",JSON.stringify(profiles.slice(0,32)));
+                setSetting("rpcSelected",p.id);
+                setSetting("rpcEnabled",true);
+                setNotice("Compatibility presence sent. Check its visibility on another client.");
+            },false,"compatPublish"));
+        const sections=[
+            el(RN.View,{key:"title",style:{gap:5}},
+                text("Rich Presence Studio",{fontSize:21,fontWeight:"800"}),
+                text("Live activity, artwork, game library and publishing controls.",{color:muted,fontSize:12})),
+            preview,
             el(RN.View,{key:"actions",style:{flexDirection:"row",flexWrap:"wrap",gap:8}},
-                button("Publish activity",publishCurrent,true),
-                button("Stop publishing",stopCurrent,false),
-                button("Save profile",saveCurrent,false),
-                button("Reset timer",resetTimer,false),
-                button("Delete saved",removeCurrent,false)),
-            notice?text(notice,{color:"#e7c88a"}):null,
-            text("Experimental: this sends a local activity event through the signed-in Discord client. No token is requested. External visibility, images and buttons are not guaranteed; Discord may reject the activity.",{color:muted,fontSize:12,lineHeight:18})
+                button(rpcRunning?"Update activity":"Publish activity",publishCurrent,true),
+                button("Stop",stopCurrent,false),
+                button("Save",saveCurrent,false)),
+            notice?text(notice,{color:"#e7c88a",fontSize:12}):null,
+            menu,
+            tab==="games"?el(RN.View,{key:"gamesTab",style:{gap:11}},
+                savedRows,presets):null,
+            tab==="editor"?editor:null,
+            tab==="send"?sending:null,
+            tab==="editor"?el(RN.View,{key:"editActions",style:{flexDirection:"row",flexWrap:"wrap",gap:8}},
+                button("Delete saved",removeCurrent,false)):null,
+            text("The preview is local. Other Discord clients control which activities, buttons and elapsed seconds they display.",
+                {fontSize:11,color:muted,lineHeight:17})
         ];
         return el(RN.ScrollView,{key:"venusRpcEditor",keyboardShouldPersistTaps:"handled",
             contentContainerStyle:{padding:16,paddingBottom:40,gap:12}},...sections);
