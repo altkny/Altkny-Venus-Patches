@@ -36,7 +36,7 @@ const ctx={
   Date,console
 };
 vm.createContext(ctx);
-vm.runInContext(src+'\nglobalThis.__rpc={build:venusRpcBuildActivity,publish:venusRpcPublish,clear:venusRpcClear,state:venusRpcTransport,catalogLoad:venusRpcCatalogLoad,officialIcon:venusRpcOfficialIcon,previewImage:venusRpcPreviewImage,knownGames:venusRpcKnownGames};',ctx);
+vm.runInContext(src+'\nglobalThis.__rpc={build:venusRpcBuildActivity,publish:venusRpcPublish,clear:venusRpcClear,state:venusRpcTransport,catalogLoad:venusRpcCatalogLoad,officialIcon:venusRpcOfficialIcon,previewImage:venusRpcPreviewImage,knownGames:venusRpcKnownGames,appId:venusRpcAppId};',ctx);
 const rpc=ctx.__rpc;
 const game={
   id:"minecraft",name:"Minecraft",details:"Overworld",state:"Survival",
@@ -57,6 +57,16 @@ assert.equal(compatibility.activity.timestamps.start,1700000000000);
 const gatewayBuilt=rpc.build({id:"newgame",name:"Missing game",sendMode:"kizzy",elapsed:true,buttons:[]},1700000000000);
 assert.equal(gatewayBuilt.activity.application_id,"962990036020756480");
 assert.equal(gatewayBuilt.activity.timestamps.start,1700000000000);
+assert.equal(rpc.appId({id:"app:minecraft",name:"Minecraft",category:"Music"}),null,
+    "App templates must not automatically impersonate detected game names");
+assert.equal(rpc.previewImage({id:"app:spotify",name:"Spotify",category:"Music",
+    iconUrl:"https://example.org/spotify-cover.png"},false),"https://example.org/spotify-cover.png");
+const party=rpc.build({...game,platform:"android",partyCurrent:2,partyMax:5},1700000000000);
+assert.equal(party.activity.platform,"android");
+assert.equal(party.activity.party.size[0],2);
+assert.equal(party.activity.party.size[1],5);
+const invalidParty=rpc.build({...game,partyCurrent:7,partyMax:2},1700000000000);
+assert.equal(invalidParty.activity.party,undefined);
 const listening=rpc.build({...game,type:2},1700000000000);
 assert.equal(listening.activity.type,2);
 const streaming=rpc.build({...game,type:1,streamUrl:"https://twitch.tv/test"},1700000000000);
