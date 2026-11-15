@@ -189,7 +189,8 @@
         const [manualTime,setManualTime]=React.useState(()=>
             venusRpcTime(venusRpcNormalize(venusRpcProfiles().find(x=>x.id===settings.rpcSelected)||
                 VENUS_RPC_EMPTY).timeOffsetSeconds));
-        const rpcRunning=!!(settings.rpcEnabled && venusRpcTransport.active);
+        const rpcRunning=!!(settings.rpcEnabled && venusRpcTransport.active &&
+            (venusRpcTransport.mode!=="kizzy"||venusRpcGateway.status==="published"));
         React.useEffect(()=>{
             let active=true;
             Promise.resolve().then(()=>venusRpcCatalogLoad(false)).catch(()=>{}).then(()=>{
@@ -514,8 +515,12 @@
         const savedRows=saved.length?el(RN.View,{key:"saved",style:{gap:7}},
             text("Quick switch · Saved profiles",{fontSize:15,fontWeight:"700"}),
             el(RN.ScrollView,{horizontal:true,showsHorizontalScrollIndicator:false,
-                contentContainerStyle:{flexDirection:"row",gap:7,paddingVertical:2}},
-                ...saved.map(p=>button(p.name,()=>choose(p),p.id===profile.id,p.id+"saved")))):null;
+                contentContainerStyle:{flexDirection:"row",gap:8,paddingVertical:2}},
+                ...saved.map(p=>el(RN.View,{key:p.id,style:{
+                    flexDirection:"row",alignItems:"center",gap:4,
+                    padding:3,borderRadius:12,backgroundColor:"#292e40"}},
+                    button(p.name,()=>choose(p),p.id===profile.id,p.id+"saved"),
+                    button("▶",()=>publishProfile(p),false,p.id+"publish"))))):null;
         const buttons=[0,1].map(i=>el(RN.View,{key:"custombutton"+i,style:{gap:6,marginVertical:4}},
             text("Button "+(i+1),{fontSize:13,fontWeight:"700"}),
             el(RN.TextInput,{accessibilityLabel:"Button "+(i+1)+" label",value:profile.buttons[i].label,
@@ -528,7 +533,7 @@
                 style:{color:fg,backgroundColor:"#171a21",padding:10,borderRadius:10},
                 onChangeText:value=>updateButton(i,"url",value)})));
         const menu=el(RN.View,{key:"navigation",style:{flexDirection:"row",gap:7}},
-            [["games","Games"],["editor","Customize"],["send","Publication"]].map(([id,label])=>
+            [["games","Library"],["editor","Customize"],["send","Publication"]].map(([id,label])=>
                 el(RN.Pressable,{key:id,onPress:()=>setTab(id),accessibilityRole:"tab",
                     accessibilityState:{selected:tab===id},
                     style:{flex:1,alignItems:"center",paddingVertical:12,borderRadius:12,
