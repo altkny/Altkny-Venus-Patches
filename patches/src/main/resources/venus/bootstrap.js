@@ -6060,7 +6060,7 @@
     const VENUS_RPC_PID = 20941;
     const venusRpcTransport = {attached:false, connected:false, active:false,
         startedAt:0, profileId:null, error:"", lastSent:0, account:null,
-        lastPayload:null, timeOffset:0};
+        lastPayload:null, timeOffset:0, mode:"rich"};
     // Discord's own detectable games directory, loaded on demand only.
     // A search result always carries its real Discord application ID and icon hash.
     const venusRpcCatalog = {games:null,loading:null,at:0,error:"",source:"fallback"};
@@ -6165,7 +6165,7 @@
     }
     function venusRpcBuildActivity(profile, startedAt) {
         const p=venusRpcNormalize(profile), app=venusRpcAppId(p);
-        if (!app && p.sendMode!=="compat") return {error:"This game needs an Application ID. Try Compatibility mode."};
+        if (!app && p.sendMode==="rich") return {error:"This game needs an Application ID. Try Compatibility or Kizzy Gateway."};
         if (!p.name) return {error:"An activity name is required."};
         const buttons=p.buttons.filter(b=>b.label&&venusRpcValidUrl(b.url)).slice(0,2);
         if (p.buttons.some(b=>(b.label||b.url)&&(!b.label||!venusRpcValidUrl(b.url))))
@@ -6173,10 +6173,11 @@
         // Both modes use the already-authenticated local client dispatcher.
         // Compatibility sends a simplified game presence without an app ID.
         // It is not a Kizzy/Gateway connection and may still be filtered.
-        const mode=p.sendMode==="compat"?"compat":"rich";
+        const mode=p.sendMode==="compat"?"compat":p.sendMode==="kizzy"?"kizzy":"rich";
         const kind=[0,1,2,3,5].includes(p.type)?p.type:0;
         const activity={name:p.name,type:kind,flags:0};
-        if(mode==="rich") activity.application_id=app;
+        if(mode==="rich"||mode==="kizzy")
+            activity.application_id=app||(mode==="kizzy"?"962990036020756480":null);
         if(kind===1&&p.streamUrl){
             if(!venusRpcValidUrl(p.streamUrl)) return {error:"Streaming URL must be HTTPS."};
             activity.url=p.streamUrl;
@@ -6191,7 +6192,8 @@
         if(p.smallImage) assets.small_image=p.smallImage;
         if(p.largeText) assets.large_text=p.largeText;
         if(p.smallText) assets.small_text=p.smallText;
-        if(Object.keys(assets).length&&mode==="rich") activity.assets=assets;
+        if(Object.keys(assets).length&&(mode==="rich"||mode==="kizzy"))
+            activity.assets=assets;
         if(buttons.length) {
             activity.buttons=buttons.map(b=>b.label);
             activity.metadata={button_urls:buttons.map(b=>b.url)};
@@ -6213,7 +6215,9 @@
         venusRpcTransport.startedAt=0;
         venusRpcTransport.lastPayload=null;
         venusRpcTransport.timeOffset=0;
-        if(was) venusRpcDispatch(null);
+        venusRpcTransport.mode="rich";
+        if(venusRpcGateway.active||venusRpcGatewayAuthorized()) venusRpcGatewayStop(true);
+        if(was&&venusRpcTransport.mode!=="kizzy") venusRpcDispatch(null);
         // An explicit stop clears the stored epoch. Logout/account switches
         // retain it for the same account, but never publish it to another.
         if(!settings.rpcEnabled){
@@ -6246,16 +6250,28 @@
         // a remote Discord client redraw its timer more frequently.
         const payload=JSON.stringify(built.activity);
         if(resumed && venusRpcTransport.active &&
+            venusRpcTransport.mode===p.sendMode &&
             venusRpcTransport.profileId===p.id &&
             venusRpcTransport.account===currentId() &&
             venusRpcTransport.lastPayload===payload)
             return {ok:true,skipped:true,error:""};
-        if(p.sendMode!=="compat") venusRpcWarmApplication(venusRpcAppId(p));
-        const success=venusRpcDispatch(built.activity);
-        if(!success) {
-            venusRpcTransport.error="Discord's local activity dispatcher is unavailable.";
+        let delivery={ok:false,error:""};
+        if(p.sendMode==="kizzy") {
+            // Remove the old local activity before starting the separate Gateway.
+            if(venusRpcTransport.active&&venusRpcTransport.mode!=="kizzy")
+                venusRpcDispatch(null);
+            delivery=venusRpcGatewayPublish(built.activity,start);
+        } else {
+            if(venusRpcGateway.active||venusRpcGatewayAuthorized())
+                venusRpcGatewayStop(true);
+            if(p.sendMode!=="compat") venusRpcWarmApplication(venusRpcAppId(p));
+            delivery={ok:!!venusRpcDispatch(built.activity),
+                error:"Discord's local activity dispatcher is unavailable."};
+        }
+        if(!delivery.ok) {
+            venusRpcTransport.error=delivery.error;
             notify("rpcEnabled");
-            return {ok:false,error:venusRpcTransport.error};
+            return {ok:false,error:delivery.error};
         }
         venusRpcTransport.active=true;
         venusRpcTransport.profileId=p.id;
@@ -6264,6 +6280,7 @@
         venusRpcTransport.lastSent=Date.now();
         venusRpcTransport.lastPayload=payload;
         venusRpcTransport.timeOffset=offset;
+        venusRpcTransport.mode=p.sendMode||"rich";
         venusRpcTransport.error="";
         if(!resumed || changedOffset || !venusRpcStoredStart()){
             setSetting("rpcStartedAt",start);
@@ -6271,7 +6288,7 @@
         }
         backgroundSync();
         notify("rpcEnabled");
-        return {ok:true,error:""};
+        return {ok:true,pending:!!delivery.pending,error:""};
     }
     function venusRpcSavedProfile() {
         return venusRpcProfiles().find(p=>p.id===settings.rpcSelected)||null;
@@ -6281,6 +6298,12 @@
         const p=venusRpcSavedProfile();
         if (!p) {
             venusRpcTransport.error="Saved RPC profile not found.";
+            notify("rpcEnabled");
+            return;
+        }
+        if(p.sendMode==="kizzy"&&!venusRpcGatewayAuthorized()){
+            // Never reconnect an independent user session silently after restart.
+            venusRpcTransport.error="Kizzy Gateway needs authorization after restarting Discord.";
             notify("rpcEnabled");
             return;
         }
@@ -6311,6 +6334,224 @@
         });
         if(currentId()) later(venusRpcRestore,1200,false);
     }
+    const VENUS_RPC_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
+    const venusRpcGateway = {
+        credential:null, acknowledged:false, socket:null, account:null,
+        active:false, ready:false, status:"off", error:"",
+        activity:null, start:0, lastSent:0, sequence:null, sessionId:null,
+        resumeUrl:null, heartbeat:null, reconnectTimer:null, retries:0,
+        ack:true, generation:0
+    };
+    function venusRpcGatewayStatus(status,error) {
+        venusRpcGateway.status=status;
+        venusRpcGateway.error=error||"";
+        notify("rpcGateway");
+    }
+    function venusRpcGatewayAuthorize(token,acknowledged) {
+        if(acknowledged!==true) return {ok:false,error:"Accept the Gateway risks before connecting."};
+        if(typeof token!=="string"||token.trim().length<30||token.trim().length>256)
+            return {ok:false,error:"Enter a valid account token to start this independent session."};
+        if(venusRpcGateway.active) venusRpcGatewayStop(true);
+        // Ephemeral memory only. The token is not passed to setSetting or logged.
+        venusRpcGateway.credential=token.trim();
+        venusRpcGateway.acknowledged=true;
+        venusRpcGatewayStatus("ready","");
+        return {ok:true,error:""};
+    }
+    function venusRpcGatewayAuthorized() {
+        return !!(venusRpcGateway.credential&&venusRpcGateway.acknowledged);
+    }
+    function venusRpcGatewayClearTimers() {
+        if(venusRpcGateway.heartbeat!==null&&global.clearInterval)
+            global.clearInterval(venusRpcGateway.heartbeat);
+        if(venusRpcGateway.reconnectTimer!==null&&global.clearTimeout)
+            global.clearTimeout(venusRpcGateway.reconnectTimer);
+        venusRpcGateway.heartbeat=null;
+        venusRpcGateway.reconnectTimer=null;
+    }
+    function venusRpcGatewaySend(op,data) {
+        const ws=venusRpcGateway.socket;
+        if(!ws||ws.readyState!==1) return false;
+        try {ws.send(JSON.stringify({op,d:data}));return true;}
+        catch (_) {venusRpcGatewayStatus("error","Gateway send failed.");return false;}
+    }
+    function venusRpcGatewayPresence(activity,start) {
+        // This is the same opcode 3 presence envelope the Kizzy client uses.
+        return {activities:activity?[activity]:[],afk:true,
+            since:activity?start||Date.now():null,status:"online"};
+    }
+    function venusRpcGatewayFlush() {
+        if(!venusRpcGateway.ready) return false;
+        if(!venusRpcGatewaySend(3,venusRpcGatewayPresence(
+            venusRpcGateway.activity,venusRpcGateway.start))) return false;
+        venusRpcGateway.lastSent=Date.now();
+        venusRpcGatewayStatus("published","");
+        return true;
+    }
+    function venusRpcGatewayCloseSocket() {
+        const ws=venusRpcGateway.socket;
+        venusRpcGateway.socket=null;
+        venusRpcGateway.ready=false;
+        if(!ws) return;
+        try {
+            ws.onopen=null;ws.onclose=null;ws.onmessage=null;ws.onerror=null;
+            if(ws.readyState===0||ws.readyState===1) ws.close(1000,"Presence stopped");
+        }catch (_) {}
+    }
+    function venusRpcGatewayStop(clearRemote) {
+        if(clearRemote&&venusRpcGateway.ready) {
+            venusRpcGatewaySend(3,venusRpcGatewayPresence(null,0));
+        }
+        venusRpcGateway.active=false;
+        venusRpcGateway.generation++;
+        venusRpcGatewayClearTimers();
+        venusRpcGatewayCloseSocket();
+        venusRpcGateway.credential=null;
+        venusRpcGateway.acknowledged=false;
+        venusRpcGateway.account=null;
+        venusRpcGateway.activity=null;
+        venusRpcGateway.start=0;
+        venusRpcGateway.sequence=null;
+        venusRpcGateway.sessionId=null;
+        venusRpcGateway.resumeUrl=null;
+        venusRpcGateway.retries=0;
+        venusRpcGatewayStatus("off","");
+    }
+    function venusRpcGatewayReconnect(message) {
+        if(!venusRpcGateway.active) return;
+        venusRpcGatewayClearTimers();
+        venusRpcGatewayCloseSocket();
+        if(venusRpcGateway.retries>=5) {
+            venusRpcGatewayStop(false);
+            venusRpcGatewayStatus("error","Gateway reconnect limit reached. Reauthorize.");
+            return;
+        }
+        const delay=Math.min(30000,1000*Math.pow(2,venusRpcGateway.retries++));
+        venusRpcGatewayStatus("reconnecting",message||"Reconnecting");
+        const generation=venusRpcGateway.generation;
+        if(global.setTimeout) venusRpcGateway.reconnectTimer=global.setTimeout(()=>{
+            if(venusRpcGateway.generation===generation&&venusRpcGateway.active)
+                venusRpcGatewayOpen();
+        },delay);
+    }
+    function venusRpcGatewayHeartbeat() {
+        if(!venusRpcGateway.active) return;
+        if(!venusRpcGateway.ack) {
+            venusRpcGatewayReconnect("Gateway did not acknowledge heartbeat.");
+            return;
+        }
+        venusRpcGateway.ack=false;
+        venusRpcGatewaySend(1,venusRpcGateway.sequence);
+    }
+    function venusRpcGatewayOpen() {
+        if(!venusRpcGateway.active||!venusRpcGatewayAuthorized()) return false;
+        if(currentId()!==venusRpcGateway.account) {
+            venusRpcGatewayStop(false);
+            venusRpcGatewayStatus("error","Discord account changed. Reauthorize.");
+            return false;
+        }
+        if(typeof global.WebSocket!=="function") {
+            venusRpcGatewayStop(false);
+            venusRpcGatewayStatus("error","WebSocket is unavailable in this Discord runtime.");
+            return false;
+        }
+        let ws;
+        try {ws=new global.WebSocket(venusRpcGateway.resumeUrl||VENUS_RPC_GATEWAY_URL);}
+        catch (_) {
+            venusRpcGatewayReconnect("Could not connect to Discord Gateway.");
+            return false;
+        }
+        venusRpcGateway.socket=ws;
+        venusRpcGateway.ready=false;
+        venusRpcGatewayStatus("connecting","");
+        ws.onmessage=event=>{
+            if(ws!==venusRpcGateway.socket||!venusRpcGateway.active) return;
+            let frame;
+            try {frame=JSON.parse(event.data);} catch (_) {return;}
+            if(typeof frame.s==="number") venusRpcGateway.sequence=frame.s;
+            if(frame.op===10) {
+                const interval=Number(frame.d&&frame.d.heartbeat_interval);
+                if(!(interval>=1000&&interval<=300000)) {
+                    venusRpcGatewayReconnect("Invalid heartbeat interval.");
+                    return;
+                }
+                venusRpcGateway.ack=true;
+                if(global.setInterval) venusRpcGateway.heartbeat=
+                    global.setInterval(venusRpcGatewayHeartbeat,interval);
+                venusRpcGatewayHeartbeat();
+                if(venusRpcGateway.sessionId&&venusRpcGateway.sequence!==null) {
+                    venusRpcGatewaySend(6,{token:venusRpcGateway.credential,
+                        session_id:venusRpcGateway.sessionId,seq:venusRpcGateway.sequence});
+                } else {
+                    // Kizzy identifies as Discord Client on Windows.
+                    venusRpcGatewaySend(2,{
+                        token:venusRpcGateway.credential,
+                        capabilities:65,compress:false,largeThreshold:100,
+                        properties:{os:"Windows",browser:"Discord Client",device:"ktor"}
+                    });
+                }
+            } else if(frame.op===11) {
+                venusRpcGateway.ack=true;
+            } else if(frame.op===1) {
+                venusRpcGatewaySend(1,venusRpcGateway.sequence);
+            } else if(frame.op===7) {
+                venusRpcGatewayReconnect("Gateway requested reconnect.");
+            } else if(frame.op===9) {
+                venusRpcGateway.sessionId=null;
+                venusRpcGateway.sequence=null;
+                venusRpcGateway.resumeUrl=null;
+                venusRpcGatewayReconnect("Gateway invalidated session.");
+            } else if(frame.op===0&&frame.t==="READY") {
+                const account=frame.d&&frame.d.user&&frame.d.user.id;
+                if(account&&account!==venusRpcGateway.account) {
+                    venusRpcGatewayStop(false);
+                    venusRpcGatewayStatus("error","Gateway token belongs to a different Discord account.");
+                    return;
+                }
+                venusRpcGateway.sessionId=frame.d&&frame.d.session_id||null;
+                const resume=frame.d&&frame.d.resume_gateway_url;
+                if(typeof resume==="string"&&/^wss:\/\/[a-z0-9.-]+\.discord\.gg\/?$/i.test(resume))
+                    venusRpcGateway.resumeUrl=resume.replace(/\/+$/,"")+"/?v=10&encoding=json";
+                venusRpcGateway.ready=true;
+                venusRpcGateway.retries=0;
+                venusRpcGatewayFlush();
+            } else if(frame.op===0&&frame.t==="RESUMED") {
+                venusRpcGateway.ready=true;
+                venusRpcGateway.retries=0;
+                venusRpcGatewayFlush();
+            }
+        };
+        ws.onerror=()=>{
+            if(ws===venusRpcGateway.socket) venusRpcGatewayStatus("connecting","Gateway connection error.");
+        };
+        ws.onclose=event=>{
+            if(ws!==venusRpcGateway.socket||!venusRpcGateway.active) return;
+            if([4004,4010,4011,4013,4014].includes(event&&event.code)) {
+                venusRpcGatewayStop(false);
+                venusRpcGatewayStatus("error","Gateway rejected this connection.");
+            } else venusRpcGatewayReconnect("Gateway disconnected.");
+        };
+        return true;
+    }
+    function venusRpcGatewayPublish(activity,start) {
+        if(!venusRpcGatewayAuthorized())
+            return {ok:false,error:"Gateway mode requires risk acceptance and manual authorization."};
+        const account=currentId();
+        if(!account) return {ok:false,error:"Sign in to Discord first."};
+        if(venusRpcGateway.active&&venusRpcGateway.account!==account) {
+            venusRpcGatewayStop(false);
+            return {ok:false,error:"Account changed. Reauthorize Gateway mode."};
+        }
+        venusRpcGateway.activity=activity;
+        venusRpcGateway.start=start;
+        venusRpcGateway.account=account;
+        if(venusRpcGateway.ready) return {ok:venusRpcGatewayFlush(),pending:false,error:venusRpcGateway.error};
+        if(venusRpcGateway.active) return {ok:true,pending:true,error:""};
+        venusRpcGateway.active=true;
+        venusRpcGateway.retries=0;
+        const connected=venusRpcGatewayOpen();
+        return {ok:connected,pending:connected,error:connected?"":venusRpcGateway.error};
+    }
     const VENUS_RPC_GAMES = [
         "Minecraft","ROBLOX","VALORANT","Fortnite","Terraria","Stardew Valley",
         "Counter-Strike 2","League of Legends","Apex Legends","ELDEN RING",
@@ -6337,7 +6578,7 @@
             largeText:venusRpcClean(p.largeText),smallText:venusRpcClean(p.smallText),
             type:[0,1,2,3,5].includes(Number(p.type))?Number(p.type):0,
             streamUrl:venusRpcClean(p.streamUrl,512),
-            sendMode:p.sendMode==="compat"?"compat":"rich",
+            sendMode:p.sendMode==="kizzy"?"kizzy":p.sendMode==="compat"?"compat":"rich",
             timeOffsetSeconds:Math.max(0,Math.min(7*86400,Math.floor(Number(p.timeOffsetSeconds)||0))),
             elapsed:p.elapsed === true,
             buttons:[0,1].map(i=>({label:venusRpcClean(buttons[i] && buttons[i].label,32),
@@ -6430,6 +6671,9 @@
         const [search,setSearch]=React.useState("");
         const [visible,setVisible]=React.useState(12);
         const [liveSync,setLiveSync]=React.useState(true);
+        const [gatewayToken,setGatewayToken]=React.useState("");
+        const [gatewayConsent,setGatewayConsent]=React.useState(false);
+        useSettings("rpcGateway");
         const [tab,setTab]=React.useState("games");
         const [manualTime,setManualTime]=React.useState(()=>
             venusRpcTime(venusRpcNormalize(venusRpcProfiles().find(x=>x.id===settings.rpcSelected)||
@@ -6517,20 +6761,32 @@
             edit(p);
             setNotice("Profile saved on this device.");
         };
-        const publishCurrent=()=>{
-            const p=venusRpcNormalize(profile);
-            const resume=rpcRunning&&venusRpcTransport.profileId===p.id;
-            const result=venusRpcPublish(p,resume);
-            if (!result.ok) {setNotice(result.error);return;}
-            const items=venusRpcProfiles().filter(x=>x.id!==p.id);
-            items.unshift(p);
+        const publishProfile=p=>{
+            const normalized=venusRpcNormalize(p);
+            const resume=rpcRunning&&venusRpcTransport.profileId===normalized.id;
+            const result=venusRpcPublish(normalized,resume);
+            if(!result.ok){setNotice(result.error);return false;}
+            const items=venusRpcProfiles().filter(x=>x.id!==normalized.id);
+            items.unshift(normalized);
             setSetting("rpcProfiles",JSON.stringify(items.slice(0,32)));
-            setSetting("rpcSelected",p.id);
+            setSetting("rpcSelected",normalized.id);
             setSetting("rpcEnabled",true);
             backgroundSync();
-            edit(p);
+            edit(normalized);
             setStarted(venusRpcTransport.startedAt);
-            setNotice("Activity dispatched. Another Discord client must confirm its public visibility.");
+            setNotice(result.pending?
+                "Kizzy Gateway is connecting. Wait for the published status before checking another device.":
+                "Activity sent. Verify its public visibility from another Discord client.");
+            return true;
+        };
+        const publishCurrent=()=>publishProfile(profile);
+        const authorizeGateway=()=>{
+            const consent=venusRpcGatewayAuthorize(gatewayToken,gatewayConsent);
+            if(!consent.ok){setNotice(consent.error);return;}
+            setGatewayToken("");
+            const p=venusRpcNormalize(Object.assign({},profile,{sendMode:"kizzy"}));
+            setTab("send");
+            publishProfile(p);
         };
         const stopCurrent=()=>{
             setSetting("rpcEnabled",false);
@@ -6575,13 +6831,14 @@
             text("Publication format",{fontSize:15,fontWeight:"700"}),
             button("Full Rich Presence · Application ID",()=>
                 edit(p=>Object.assign({},p,{sendMode:"rich"})),
-                profile.sendMode!=="compat","rich"),
+                profile.sendMode==="rich","rich"),
             button("Compatibility · Name-only game",()=>
                 edit(p=>Object.assign({},p,{sendMode:"compat"})),
                 profile.sendMode==="compat","compat"),
-            text("Both use the local Discord client. Compatibility removes the Application ID and custom assets. It may help with unsupported game IDs, but visibility is not guaranteed.",
-                {color:muted,fontSize:12,lineHeight:18}),
-            text("Kizzy-style Gateway authentication is not included: the Venus patch will not extract or request your Discord account token.",
+            button("Kizzy Gateway · Independent WebSocket",()=>
+                edit(p=>Object.assign({},p,{sendMode:"kizzy"})),
+                profile.sendMode==="kizzy","kizzy"),
+            text("Full and Compatibility use Discord's local activity dispatcher. Kizzy Gateway opens a distinct authenticated WebSocket and sends PRESENCE_UPDATE (opcode 3).",
                 {color:muted,fontSize:12,lineHeight:18}));
         const image=(p,small,size)=>el(VenusRpcCover,{
             key:(small?"small:":"cover:")+(venusRpcPreviewImage(p,small)||"none"),
@@ -6594,7 +6851,8 @@
             backgroundColor:"#20232b",borderWidth:1,borderColor:"#414651",padding:15,gap:10}},
             el(RN.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}},
                 text((VENUS_RPC_TYPES.find(row=>row[0]===profile.type)||VENUS_RPC_TYPES[0])[1].toUpperCase()+
-                    " · "+(profile.sendMode==="compat"?"COMPATIBILITY":"RICH PRESENCE"),
+                    " · "+(profile.sendMode==="kizzy"?"KIZZY GATEWAY":
+                        profile.sendMode==="compat"?"COMPATIBILITY":"RICH PRESENCE"),
                     {fontSize:10,color:muted,fontWeight:"700",letterSpacing:0.5}),
                 text("LIVE PREVIEW",{fontSize:10,color:"#a8b0ff",fontWeight:"700"})),
             el(RN.View,{style:{flexDirection:"row",gap:12,alignItems:"center"}},
@@ -6733,9 +6991,41 @@
             field("Small image description","smallText","Icon"),
             text("Activity buttons",{fontSize:16,fontWeight:"700"}),
             ...buttons);
+        const gatewayPanel=profile.sendMode==="kizzy"?
+            el(RN.View,{key:"gatewayPanel",style:{gap:10,padding:12,borderRadius:14,
+                borderWidth:1,borderColor:"#535976",backgroundColor:"#212534"}},
+                text("Kizzy Gateway · manual authorization",{fontSize:16,fontWeight:"700"}),
+                text("This is an independent user session, not a regular Discord RPC connection. Discord can reject it or restrict the account. Use it only if you accept that risk.",
+                    {color:"#efc4a2",fontSize:12,lineHeight:18}),
+                text("Your token is a private account credential. Venus does not read it from Discord, save it in settings/backups, or log it. It is sent only to Discord's Gateway and cleared from memory when stopped.",
+                    {color:muted,fontSize:12,lineHeight:18}),
+                el(RN.View,{style:{flexDirection:"row",alignItems:"center",gap:12}},
+                    el(RN.Switch,{value:gatewayConsent,onValueChange:setGatewayConsent}),
+                    el(RN.View,{style:{flex:1}},text("I understand the risks and agree to use this independent connection.",
+                        {fontSize:12,fontWeight:"600"}))),
+                el(RN.TextInput,{accessibilityLabel:"Discord account token for Kizzy Gateway",
+                    placeholder:venusRpcGatewayAuthorized()?"Authorized for this session":"Account token (never saved)",
+                    placeholderTextColor:"#9198a8",value:gatewayToken,
+                    secureTextEntry:true,autoCapitalize:"none",autoCorrect:false,
+                    maxLength:256,onChangeText:setGatewayToken,
+                    style:{color:fg,backgroundColor:"#171a21",padding:12,
+                        borderWidth:1,borderColor:line,borderRadius:10}}),
+                text("Connection: "+venusRpcGateway.status+
+                    (venusRpcGateway.error?" · "+venusRpcGateway.error:""),
+                    {fontSize:12,color:venusRpcGateway.status==="published"?"#89d2ad":muted}),
+                button(venusRpcGatewayAuthorized()?"Replace token and publish":"Authorize Gateway and publish",
+                    authorizeGateway,false,"authorizeGateway"),
+                venusRpcGatewayAuthorized()?button("Stop and forget Gateway token",()=>{
+                    setSetting("rpcEnabled",false);
+                    venusRpcClear();
+                    setNotice("Gateway stopped; credential erased from memory.");
+                },false,"forgetGateway"):null,
+                text("After restarting Discord, authorization is required again. Credentials are never backed up.",
+                    {color:muted,fontSize:11,lineHeight:17})):null;
         const sending=el(RN.View,{key:"sendingTab",style:{gap:10}},
             text("How activity is sent",{fontSize:18,fontWeight:"700"}),
             deliveryPicker,
+            gatewayPanel,
             text("Discord application",{fontSize:16,fontWeight:"700"}),
             field("Application ID","applicationId","Enter the game's registered ID",20),
             text("A game in the searchable directory is not necessarily publishable as Rich Presence. Discord may filter unsupported applications.",
@@ -6746,7 +7036,8 @@
             text("Automatic synchronization sends only changed payloads. The timestamp stays unchanged unless you edit the timer.",
                 {fontSize:12,color:muted,lineHeight:18}),
             text("Connection diagnostics",{fontSize:16,fontWeight:"700"}),
-            text("Sender: local Discord activity dispatcher",{fontSize:12,color:muted}),
+            text("Sender: "+(profile.sendMode==="kizzy"?"Independent Kizzy Gateway":
+                "Local Discord activity dispatcher"),{fontSize:12,color:muted}),
             text("Last dispatch: "+(venusRpcTransport.lastSent?
                 new Date(venusRpcTransport.lastSent).toLocaleTimeString():"Not sent yet"),
                 {fontSize:12,color:muted}),
