@@ -60,7 +60,7 @@ assert.equal(sent.at(-1).op,3);
 assert.equal(sent.at(-1).d.activities[0].name,"Minecraft");
 assert.equal(sent.at(-1).d.activities[0].timestamps.start,1700000000000);
 assert.equal(sent.at(-1).d.since,1700000000000);
-assert.equal(g.gateway.status,"published");
+assert.equal(g.gateway.status,"submitted","Only WebSocket send is confirmed, not public visibility");
 const before=sent.length;
 assert.equal(g.publish({...sample,details:"Updated"},1700000000000).ok,true);
 assert.equal(sent.length,before+1);
