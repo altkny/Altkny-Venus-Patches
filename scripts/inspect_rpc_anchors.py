@@ -34,3 +34,13 @@ for a,b in [(1690,1760),(1840,1880)]:
  print(f"\\n### FOCUSED RANGE {a}-{b} ###")
  for n in range(a-1,min(len(lines),b)):
   print(f"{n+1}: {lines[n][:450]}")
+
+print("\\n### BADGE TRANSPORT INSPECTION ###")
+for ptn in [r'function badges[A-Z][A-Za-z]*\\(',r'function badge[A-Z][A-Za-z]*\\(',r'function BadgeSettings\\(',r'function (?:badge|badges)[A-Za-z]+\\(',r'badge(?:s)?\\.(?:socket|client|session|activity)',r'PRESENCE_UPDATE']:
+ found=list(re.finditer(ptn,s,re.I))[:20]
+ print("PATTERN",ptn,"COUNT",len(found))
+ for m in found[:12]:
+  idx=s.count("\\n",0,m.start())
+  print("\\nMATCH LINE",idx+1)
+  for n in range(max(0,idx-2),min(len(lines),idx+10)):
+   print(f"{n+1}: {lines[n][:240]}")
