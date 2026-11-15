@@ -8,7 +8,7 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 target=root/"patches/src/main/resources/venus/bootstrap.js"
 s=target.read_text(encoding="utf-8")
-if "quest.active instanceof Map" in s:
+if "quest.active = new Map();" in s:
     print("Parallel Quest scheduler already integrated")
     raise SystemExit(0)
 def replace(old,new,count=1):
