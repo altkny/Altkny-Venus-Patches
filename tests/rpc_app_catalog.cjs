@@ -12,6 +12,7 @@ assert.ok(templates.length>=30,"A curated catalog of 30 apps should exist");
 assert.equal(new Set(templates.map(a=>a.id)).size,templates.length,"App IDs must be unique");
 assert.ok(templates.every(a=>a.id.startsWith("app:")),"Never use fake snowflake IDs");
 assert.ok(templates.every(a=>a.applicationId===""),"Never spoof an unverified application ID");
+assert.ok(templates.every(a=>a.sendMode==="kizzy"),"Apps must not use silent local Compatibility mode");
 assert.ok(templates.every(a=>categories.includes(a.category)),"All apps use supported categories");
 for(const name of ["Spotify","YouTube Music","Netflix","Visual Studio Code",
     "Android Studio","CapCut","Obsidian","Discord"]) {
