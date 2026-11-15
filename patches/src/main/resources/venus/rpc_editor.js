@@ -39,6 +39,16 @@
         ["WhatsApp","Social",0,"Messaging",""]
     ];
     const VENUS_RPC_CATEGORIES = ["All","Music","Video","Development","Creative","Productivity","Social"];
+    const VENUS_RPC_COLORS = {
+        Music:"#315c50",Video:"#604151",Development:"#364f73",
+        Creative:"#635074",Productivity:"#4b586d",Social:"#4c547a",
+        Game:"#363d63",Custom:"#424858"
+    };
+    function venusRpcMonogram(name) {
+        const words=String(name||"APP").trim().split(/[\s+\-]+/).filter(Boolean);
+        return words.length>1 ? words.slice(0,2).map(w=>w[0]).join("").toUpperCase():
+            (words[0]||"AP").slice(0,2).toUpperCase();
+    }
     function venusRpcAppEntries() {
         return VENUS_RPC_APPS.map(([name,category,type,details,state])=>({
             id:"app:"+name.toLowerCase().replace(/[^a-z0-9]+/g,"-"),
@@ -61,7 +71,8 @@
             id:venusRpcClean(p.id,64) || "custom",
             applicationId:venusRpcClean(p.applicationId,20),
             iconHash:venusRpcClean(p.iconHash,40),
-            iconUrl:venusRpcClean(p.iconUrl,512),
+            iconUrl:venusRpcValidUrl(venusRpcClean(p.iconUrl,512))?
+                venusRpcClean(p.iconUrl,512):"",
             category:venusRpcClean(p.category,32)||"Custom",
             name:venusRpcClean(p.name) || "Custom Activity",
             details:venusRpcClean(p.details),state:venusRpcClean(p.state),
@@ -193,7 +204,7 @@
                 if(result.ok){
                     const saved=venusRpcProfiles().filter(x=>x.id!==p.id);
                     saved.unshift(p);
-                    setSetting("rpcProfiles",JSON.stringify(saved.slice(0,32)));
+                    setSetting("rpcProfiles",JSON.stringify(saved.slice(0,64)));
                 }
             },850);
             return ()=>{if(global.clearTimeout) global.clearTimeout(handle);};
@@ -239,8 +250,12 @@
             setNotice("");
         };
         const custom=()=>{
-            const saved=venusRpcProfiles().find(x=>x.id==="custom");
-            const p=saved||venusRpcNormalize(VENUS_RPC_EMPTY);
+            const p=venusRpcNormalize(Object.assign({},VENUS_RPC_EMPTY,{
+                id:"custom:"+Date.now().toString(36),
+                name:"My App",category:"Custom",
+                sendMode:venusRpcTransport.mode==="kizzy"&&venusRpcGatewayAuthorized()?
+                    "kizzy":"compat"
+            }));
             edit(p);
             setManualTime(venusRpcTime(p.timeOffsetSeconds));
             setStarted(Date.now()-p.timeOffsetSeconds*1000);
