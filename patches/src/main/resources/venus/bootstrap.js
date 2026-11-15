@@ -2770,7 +2770,7 @@
         const index = config.sections.findIndex(s => s && Array.isArray(s.settings) && s.settings.includes("ACCOUNT"));
         if (index < 0 || config.sections.some(s => s && s.label === "Venus")) return orig.apply(self, args);
         const sections = config.sections.slice();
-        sections.splice(index + 1, 0, section("Venus", ["VENUS_PLUGINS", "VENUS_LANGUAGE", "VENUS_BACKUP", "VENUS_GENERAL"]));
+        sections.splice(index + 1, 0, section("Venus", ["VENUS_PLUGINS", ...(features.customRpc ? ["VENUS_RPC_STUDIO"] : []), "VENUS_LANGUAGE", "VENUS_BACKUP", "VENUS_GENERAL"]));
         const next = Array.from(args); next[0] = Object.assign({}, config, { sections });
         return orig.apply(self, next);
     }
