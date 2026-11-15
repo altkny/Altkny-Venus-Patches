@@ -26,6 +26,7 @@ assert.equal(monogram("Spotify"),"SP");
 const app=normalize({...templates[0],sendMode:"compat",platform:"android",
   iconUrl:"https://example.com/logo.png",partyCurrent:2,partyMax:4});
 assert.equal(app.category,"Music");
+assert.equal(app.sendMode,"kizzy","Upgrade old compatibility app presets to real transport");
 assert.equal(app.iconUrl,"https://example.com/logo.png");
 assert.equal(app.platform,"android");
 assert.equal(app.partyCurrent,2);
