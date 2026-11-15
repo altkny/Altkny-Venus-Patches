@@ -18,6 +18,10 @@ const ctx={
   }),
   venusRpcValidUrl:url=>/^https:\/\/[^\s]+$/i.test(url),
   venusRpcProfiles:()=>[],
+  questRequest:async()=>({body:Array.from({length:165},(_,i)=>({
+    id:String(1400000000000000000n+BigInt(i)),
+    name:"Game "+i,icon_hash:"0123456789abcdef0123456789abcdef",type:0
+  }))}),
   questDispatch:action=>(actions.push(action),true),
   currentId:()=> "123456789012345678",
   backgroundSync:()=>{},
@@ -26,7 +30,7 @@ const ctx={
   Date,console
 };
 vm.createContext(ctx);
-vm.runInContext(src+'\nglobalThis.__rpc={build:venusRpcBuildActivity,publish:venusRpcPublish,clear:venusRpcClear,state:venusRpcTransport};',ctx);
+vm.runInContext(src+'\nglobalThis.__rpc={build:venusRpcBuildActivity,publish:venusRpcPublish,clear:venusRpcClear,state:venusRpcTransport,catalogLoad:venusRpcCatalogLoad,officialIcon:venusRpcOfficialIcon,previewImage:venusRpcPreviewImage,knownGames:venusRpcKnownGames};',ctx);
 const rpc=ctx.__rpc;
 const game={
   id:"minecraft",name:"Minecraft",details:"Overworld",state:"Survival",
@@ -48,3 +52,17 @@ assert.equal(actions.at(-1).activity,null);
 assert.equal(rpc.publish({id:"custom",name:"Unregistered",buttons:[]},false).ok,false);
 assert.equal(actions.at(-1).activity,null);
 console.log("RPC transport unit tests passed (external Discord publication not tested).");
+
+(async()=>{
+  const games=await rpc.catalogLoad(true);
+  assert.equal(games.length,165,"Discord catalog should load more than the built-in fallback");
+  assert.equal(games[0].name,"Game 0");
+  assert.equal(rpc.knownGames().length,165);
+  const game=games.find(g=>g.name==="Game 15");
+  const image=rpc.officialIcon(game.id,game.icon,256);
+  assert.equal(image,"https://cdn.discordapp.com/app-icons/"+game.id+"/"+game.icon+".png?size=256");
+  assert.equal(rpc.previewImage({applicationId:game.id,name:game.name,iconHash:game.icon},false),image);
+  const extra=rpc.build({id:game.id,applicationId:game.id,name:game.name,elapsed:true,buttons:[]},12345);
+  assert.equal(extra.activity.application_id,game.id);
+  console.log("Large Discord game catalog, official images and application IDs passed.");
+})().catch(e=>{console.error(e);process.exitCode=1;});
