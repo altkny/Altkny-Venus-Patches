@@ -201,7 +201,7 @@
             venusRpcTime(venusRpcNormalize(venusRpcProfiles().find(x=>x.id===settings.rpcSelected)||
                 VENUS_RPC_EMPTY).timeOffsetSeconds));
         const rpcRunning=!!(settings.rpcEnabled && venusRpcTransport.active &&
-            (venusRpcTransport.mode!=="kizzy"||venusRpcGateway.status==="published"));
+            (venusRpcTransport.mode!=="kizzy"||venusRpcGateway.status==="submitted"));
         React.useEffect(()=>{
             let active=true;
             Promise.resolve().then(()=>venusRpcCatalogLoad(false)).catch(()=>{}).then(()=>{
@@ -382,8 +382,14 @@
             button("Full Rich Presence · Application ID",()=>
                 edit(p=>Object.assign({},p,{sendMode:"rich"})),
                 profile.sendMode==="rich","rich"),
-            button("Compatibility · Local-only experimental",()=>
-                edit(p=>Object.assign({},p,{sendMode:"compat"})),
+            button("Compatibility · Local-only experimental",()=>{
+                if(venusRpcNeedsGateway(profile)){
+                    setNotice("Third-party app templates without an Application ID cannot use local Compatibility to publish. Use the Gateway connection.");
+                    setTab("send");
+                    return;
+                }
+                edit(p=>Object.assign({},p,{sendMode:"compat"}));
+            },
                 profile.sendMode==="compat","compat"),
             button("Kizzy Gateway · Independent WebSocket",()=>
                 edit(p=>Object.assign({},p,{sendMode:"kizzy"})),
@@ -421,7 +427,9 @@
                     borderRadius:8,paddingVertical:9,alignItems:"center"}},
                     text(b.label,{fontSize:13,fontWeight:"600"}))),
             text(rpcRunning && venusRpcTransport.profileId===profile.id ?
-                (liveSync?"Active on Discord · edits sync automatically":"Active on Discord · tap Publish to update") :
+                (profile.sendMode==="kizzy"?
+                    "Submitted to Gateway · public visibility not verified":
+                    "Local dispatcher active · visibility unverified") :
                 "Preview mode · select a game and publish to start.",
                 {fontSize:11,color:rpcRunning?"#86d6b2":"#e7c88a"}));
         const catalog=venusRpcKnownGames();
@@ -651,7 +659,7 @@
                         borderWidth:1,borderColor:line,borderRadius:10}}),
                 text("Gateway connection: "+venusRpcGateway.status+
                     (venusRpcGateway.error?" · "+venusRpcGateway.error:""),
-                    {fontSize:12,color:venusRpcGateway.status==="published"?"#89d2ad":muted}),
+                    {fontSize:12,color:venusRpcGateway.status==="submitted"?"#89d2ad":muted}),
                 button(venusRpcGatewayAuthorized()?"Replace token and publish":"Authorize Gateway and publish",
                     authorizeGateway,false,"authorizeGateway"),
                 venusRpcGatewayAuthorized()?button("Stop and forget Gateway token",()=>{
