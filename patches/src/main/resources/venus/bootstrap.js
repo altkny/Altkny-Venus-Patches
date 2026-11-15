@@ -6268,6 +6268,7 @@
             setSetting("rpcProfiles",JSON.stringify(items.slice(0,32)));
             setSetting("rpcSelected",p.id);
             setSetting("rpcEnabled",true);
+            backgroundSync();
             edit(p);
             setStarted(venusRpcTransport.startedAt);
             setNotice("Activity sent to Discord's local dispatcher. External visibility is not yet verified.");
