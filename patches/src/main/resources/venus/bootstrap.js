@@ -6210,6 +6210,7 @@
     }
     function venusRpcClear() {
         const was=venusRpcTransport.active;
+        const previousMode=venusRpcTransport.mode;
         venusRpcTransport.active=false;
         venusRpcTransport.profileId=null;
         venusRpcTransport.startedAt=0;
@@ -6217,7 +6218,7 @@
         venusRpcTransport.timeOffset=0;
         venusRpcTransport.mode="rich";
         if(venusRpcGateway.active||venusRpcGatewayAuthorized()) venusRpcGatewayStop(true);
-        if(was&&venusRpcTransport.mode!=="kizzy") venusRpcDispatch(null);
+        if(was&&previousMode!=="kizzy") venusRpcDispatch(null);
         // An explicit stop clears the stored epoch. Logout/account switches
         // retain it for the same account, but never publish it to another.
         if(!settings.rpcEnabled){
@@ -6257,10 +6258,11 @@
             return {ok:true,skipped:true,error:""};
         let delivery={ok:false,error:""};
         if(p.sendMode==="kizzy") {
-            // Remove the old local activity before starting the separate Gateway.
-            if(venusRpcTransport.active&&venusRpcTransport.mode!=="kizzy")
-                venusRpcDispatch(null);
+            // Keep the old local presence if authorization fails. Only replace
+            // it after the new sender actually accepts the requested session.
             delivery=venusRpcGatewayPublish(built.activity,start);
+            if(delivery.ok&&venusRpcTransport.active&&venusRpcTransport.mode!=="kizzy")
+                venusRpcDispatch(null);
         } else {
             if(venusRpcGateway.active||venusRpcGatewayAuthorized())
                 venusRpcGatewayStop(true);
@@ -6355,6 +6357,9 @@
         // Ephemeral memory only. The token is not passed to setSetting or logged.
         venusRpcGateway.credential=token.trim();
         venusRpcGateway.acknowledged=true;
+        // A replaced credential requires a new Gateway send, even if the
+        // Rich Presence payload itself has not changed.
+        venusRpcTransport.lastPayload=null;
         venusRpcGatewayStatus("ready","");
         return {ok:true,error:""};
     }
