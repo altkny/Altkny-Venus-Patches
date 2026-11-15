@@ -15,6 +15,7 @@ class FakeSocket{
 const saved=[];
 const ctx={
   currentId:()=>account,notify:()=>{},settings:{},
+  venusRpcTransport:{lastPayload:"old-dispatch"},
   setSetting:(k,v)=>saved.push({k,v}),Date,console,
   global:{
     WebSocket:FakeSocket,
@@ -33,6 +34,7 @@ const sample={name:"Minecraft",application_id:"1402418491272986635",
 assert.equal(g.publish(sample,1700000000000).ok,false);
 assert.equal(g.authorize(fakeToken,false).ok,false);
 assert.equal(g.authorize(fakeToken,true).ok,true);
+assert.equal(ctx.venusRpcTransport.lastPayload,null,"Reauthorization invalidates stale activity cache");
 assert.equal(g.authorized(),true);
 const started=g.publish(sample,1700000000000);
 assert.equal(started.ok,true);
