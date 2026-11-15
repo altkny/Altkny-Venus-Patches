@@ -186,6 +186,15 @@
         if(resumed&&settings.rpcAccountId&&settings.rpcAccountId!==currentId())
             return {ok:false,error:"This RPC timer belongs to another Discord account."};
         const p=venusRpcNormalize(profile);
+        // Do not report a successful *local* dispatch for third-party app
+        // templates that do not have a registered Discord application ID.
+        // The old app presets were all sent this way and were not visible.
+        if(/^app:/.test(p.id)&&!venusRpcAppId(p)&&p.sendMode!=="kizzy"){
+            const error="App presets need a Gateway connection; the local dispatcher cannot confirm publication.";
+            venusRpcTransport.error=error;
+            notify("rpcEnabled");
+            return {ok:false,error};
+        }
         const offset=Math.max(0,Math.min(7*86400,Math.floor(Number(p.timeOffsetSeconds)||0)));
         const sameProfile=venusRpcTransport.active&&venusRpcTransport.profileId===p.id;
         const changedOffset=sameProfile&&venusRpcTransport.timeOffset!==offset;
