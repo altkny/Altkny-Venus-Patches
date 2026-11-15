@@ -47,6 +47,18 @@ assert.equal(data.activity.metadata.button_urls[0],"https://example.org");
 assert.equal(rpc.publish(game,false).ok,true);
 assert.equal(ctx.settings.rpcStartedAt,rpc.state.startedAt);
 assert.equal(ctx.settings.rpcAccountId,ctx.currentId());
+// The UI can mount and restore repeatedly: never spam an unchanged activity.
+const initialCount=actions.length, stableStart=rpc.state.startedAt;
+assert.equal(rpc.publish(game,true).ok,true);
+assert.equal(rpc.publish(game,true).skipped,true);
+assert.equal(actions.length,initialCount);
+assert.equal(rpc.state.startedAt,stableStart);
+// Edits may change the card but cannot restart its elapsed counter.
+assert.equal(rpc.publish({...game,details:"Updated"},true).ok,true);
+assert.equal(actions.length,initialCount+1);
+assert.equal(actions.at(-1).activity.timestamps.start,stableStart);
+assert.equal(rpc.publish({...game,details:"Updated"},true).skipped,true);
+assert.equal(actions.length,initialCount+1);
 assert.equal(actions.at(-1).type,"LOCAL_ACTIVITY_UPDATE");
 assert.equal(actions.at(-1).socketId,"venus-custom-rpc");
 assert.equal(actions.at(-1).activity.name,"Minecraft");
