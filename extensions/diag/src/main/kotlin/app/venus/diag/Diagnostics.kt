@@ -892,6 +892,15 @@ object Diagnostics {
         val c = app
         if (c == null) { promise.reject("VENUS_DIAG", "Not ready"); return true }
         when (action) {
+            "rpc:permission" -> promise.resolve(ForegroundApps.permission(c))
+            "rpc:settings" -> main.post(object : Runnable { override fun run() {
+                try { promise.resolve(ForegroundApps.openSettings(c)) }
+                catch (error: Throwable) { promise.reject("VENUS_RPC", "Cannot open usage access settings") }
+            } })
+            "rpc:foreground" -> Thread(object : Runnable { override fun run() {
+                try { promise.resolve(ForegroundApps.foreground(c, argument)) }
+                catch (_: Throwable) { promise.reject("VENUS_RPC", "App usage is unavailable") }
+            } }, "venus-rpc-foreground").start()
             "report" -> Thread(object : Runnable { override fun run() {
                 try { promise.resolve(troubleshootingReport()) } catch (error: Throwable) { promise.reject("VENUS_DIAG", error.toString()) }
             } }, "venus-report").start()
