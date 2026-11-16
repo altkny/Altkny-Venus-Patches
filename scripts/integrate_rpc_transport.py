@@ -66,6 +66,17 @@ for old,new in [
 ]:
     if old in s and new not in s:
         replace_once(old,new)
+# All library games can share one user-registered publisher Application ID.
+# This is a settings default, not a fake game identity or a token.
+if 'rpcPublisherApplicationId:""' not in s and 'rpcPublisherApplicationId: ""' not in s:
+    if 'rpcAccountId:"", rpcProfiles:' in s:
+        replace_once('rpcAccountId:"", rpcProfiles:',
+            'rpcAccountId:"", rpcPublisherApplicationId:"", rpcProfiles:')
+    elif 'rpcAccountId: "", rpcProfiles:' in s:
+        replace_once('rpcAccountId: "", rpcProfiles:',
+            'rpcAccountId: "", rpcPublisherApplicationId: "", rpcProfiles:')
+    else:
+        raise RuntimeError("Shared publisher settings default anchor missing")
 if 'if (features.customRpc) selectModules([584]);' not in s:
     replace_once('    if (features.badges) selectModules([584, 1392, 6015, 8590, 10002, 14713, 14748]);',
         '    if (features.badges) selectModules([584, 1392, 6015, 8590, 10002, 14713, 14748]);\n'
