@@ -99,7 +99,11 @@
         const known=venusRpcGameForProfile(p);
         return known?known.id:null;
     }
-    // Reuse Compatibility as an alternate sender, with no game-specific ID.
+    // Name + cover uses one user-registered publisher identity, not per-game IDs.
+    function venusRpcPublisherApplicationId() {
+        const id=String(settings.rpcPublisherApplicationId||"").trim();
+        return /^\d{17,20}$/.test(id)?id:null;
+    }
     function venusRpcGameCover(profile) {
         const p=profile||{};
         if(venusRpcValidUrl(p.largeImage)) return p.largeImage;
@@ -125,7 +129,12 @@
     }
     function venusRpcBuildActivity(profile, startedAt) {
         const p=venusRpcNormalize(profile), app=venusRpcAppId(p);
-        if (!app && p.sendMode==="rich") return {error:"This game needs an Application ID. Try Compatibility or Kizzy Gateway."};
+        const publisher=venusRpcPublisherApplicationId();
+        if (!app && p.sendMode==="rich") return {error:"This game needs an Application ID. Try Name + cover with a shared publisher ID."};
+        if(p.sendMode==="compat"&&!publisher)
+            return {error:"Name + cover requires one registered Discord Application ID in Send. A game name and image alone cannot publish Rich Presence."};
+        if(p.sendMode==="compat"&&publisher===app)
+            return {error:"The shared publisher ID must differ from this game's ID. Use your own registered Discord application."};
         if (!p.name) return {error:"An activity name is required."};
         const buttons=p.buttons.filter(b=>b.label&&venusRpcValidUrl(b.url)).slice(0,2);
         if (p.buttons.some(b=>(b.label||b.url)&&(!b.label||!venusRpcValidUrl(b.url))))
@@ -137,6 +146,8 @@
         const activity={name:p.name,type:kind,flags:0};
         if(mode==="rich"||mode==="kizzy")
             activity.application_id=app||(mode==="kizzy"?"962990036020756480":null);
+        else if(mode==="compat")
+            activity.application_id=publisher;
         if(kind===1&&p.streamUrl){
             if(!venusRpcValidUrl(p.streamUrl)) return {error:"Streaming URL must be HTTPS."};
             activity.url=p.streamUrl;
@@ -246,7 +257,9 @@
         } else {
             if(venusRpcGateway.active||venusRpcGatewayAuthorized())
                 venusRpcGatewayStop(true);
-            if(p.sendMode!=="compat") venusRpcWarmApplication(venusRpcAppId(p));
+            // Warm the *publisher* identity. Game metadata is only artwork.
+            venusRpcWarmApplication(p.sendMode==="compat"?
+                venusRpcPublisherApplicationId():venusRpcAppId(p));
             delivery={ok:!!venusRpcDispatch(built.activity),
                 error:"Discord's local activity dispatcher is unavailable."};
         }
