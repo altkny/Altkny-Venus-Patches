@@ -49,19 +49,24 @@ assert.equal(data.activity.details,"Overworld");
 assert.equal(data.activity.timestamps.start,1700000000000);
 assert.equal(data.activity.buttons[0],"Visit");
 assert.equal(data.activity.metadata.button_urls[0],"https://example.org");
+const missingPublisher=rpc.build({id:"unregistered",name:"Unknown game",sendMode:"compat",type:3,elapsed:true,buttons:[]},1700000000000);
+assert.match(missingPublisher.error,/registered Discord Application ID/,
+    "Do not report a functioning name + cover mode without a registered publisher");
+ctx.settings.rpcPublisherApplicationId="112233445566778899";
 const compatibility=rpc.build({id:"unregistered",name:"Unknown game",sendMode:"compat",type:3,elapsed:true,buttons:[]},1700000000000);
 assert.equal(compatibility.error,undefined);
 assert.equal(compatibility.activity.type,3);
-assert.equal(Object.hasOwn(compatibility.activity,"application_id"),false);
+assert.equal(compatibility.activity.application_id,ctx.settings.rpcPublisherApplicationId);
 assert.equal(compatibility.activity.timestamps.start,1700000000000);
-// Game artwork mode reuses Compatibility, without sending the game's ID.
+// Game artwork mode uses the shared publisher, not the selected game's ID.
 const coverGame={...game,category:"Game",applicationId:"1402418491272986635",
   iconHash:"0123456789abcdef0123456789abcdef",sendMode:"compat"};
 const officialCover="https://cdn.discordapp.com/app-icons/"+
   coverGame.applicationId+"/"+coverGame.iconHash+".png?size=512";
 const coverActivity=rpc.build(coverGame,1700000000000).activity;
 assert.equal(coverActivity.name,"Minecraft");
-assert.equal(Object.hasOwn(coverActivity,"application_id"),false);
+assert.equal(coverActivity.application_id,ctx.settings.rpcPublisherApplicationId);
+assert.notEqual(coverActivity.application_id,coverGame.applicationId);
 assert.equal(coverActivity.assets.large_image,officialCover);
 assert.equal(coverActivity.assets.large_text,"Minecraft");
 assert.equal(coverActivity.timestamps.start,1700000000000);
@@ -71,8 +76,12 @@ assert.equal(rpc.build({...coverGame,largeImage:"not-an-https-image"},123).activ
   officialCover,"Invalid cover URLs should fall back to official artwork");
 const withoutArtwork=rpc.build({id:"unknown",name:"Unknown",category:"Game",
   sendMode:"compat",buttons:[]},123).activity;
-assert.equal(Object.hasOwn(withoutArtwork,"application_id"),false);
+assert.equal(withoutArtwork.application_id,ctx.settings.rpcPublisherApplicationId);
 assert.equal(withoutArtwork.assets,undefined,"No invented artwork for unknown games");
+ctx.settings.rpcPublisherApplicationId=coverGame.applicationId;
+assert.match(rpc.build(coverGame,123).error,/must differ/,
+    "Publisher ID cannot reuse an unreliable game identity");
+ctx.settings.rpcPublisherApplicationId="112233445566778899";
 const gatewayBuilt=rpc.build({id:"newgame",name:"Missing game",sendMode:"kizzy",elapsed:true,buttons:[]},1700000000000);
 assert.equal(gatewayBuilt.activity.application_id,"962990036020756480");
 assert.equal(gatewayBuilt.activity.timestamps.start,1700000000000);
@@ -105,7 +114,8 @@ assert.equal(actions.length,beforeBlocked);
 assert.equal(rpc.publish(coverGame,false).ok,true);
 assert.equal(actions.at(-1).activity.assets.large_image,officialCover,
   "Local cover dispatch must retain game artwork");
-assert.equal(Object.hasOwn(actions.at(-1).activity,"application_id"),false);
+assert.equal(actions.at(-1).activity.application_id,
+  ctx.settings.rpcPublisherApplicationId);
 assert.equal(rpc.publish(game,false).ok,true);
 assert.equal(ctx.settings.rpcStartedAt,rpc.state.startedAt);
 assert.equal(ctx.settings.rpcAccountId,ctx.currentId());

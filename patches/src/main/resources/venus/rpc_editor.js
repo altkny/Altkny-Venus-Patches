@@ -189,6 +189,7 @@
     }
     function VenusRpcSettings() {
         useSettings("rpcProfiles"); useSettings("rpcSelected"); useSettings("rpcEnabled"); useSettings("rpcCatalog");
+        useSettings("rpcPublisherApplicationId");
         const [profile,edit]=React.useState(()=>venusRpcNormalize(
             venusRpcProfiles().find(x=>x.id===settings.rpcSelected) ||
             Object.assign({},VENUS_RPC_EMPTY,{name:"Minecraft",id:"minecraft"})));
@@ -395,7 +396,7 @@
             button("Full Rich Presence · Application ID",()=>
                 edit(p=>Object.assign({},p,{sendMode:"rich"})),
                 profile.sendMode==="rich","rich"),
-            button("Name + cover · No game ID (experimental)",()=>{
+            button("Name + cover · Shared app ID (experimental)",()=>{
                 if(venusRpcNeedsGateway(profile)){
                     setNotice("Third-party app templates without an Application ID cannot use local Compatibility to publish. Use the Gateway connection.");
                     setTab("send");
@@ -407,7 +408,7 @@
             button("Kizzy Gateway · Independent WebSocket",()=>
                 edit(p=>Object.assign({},p,{sendMode:"kizzy"})),
                 profile.sendMode==="kizzy","kizzy"),
-            text("Name + cover keeps the selected game's name and HTTPS artwork but omits its Application ID when sending. Both local modes are experimental and can be filtered by Discord; delivery never proves public visibility. App templates without an ID still require Gateway.",
+            text("Name + cover uses one registered publisher Application ID for all your games, not each game's ID. Without a registered app, name and image alone cannot publish Rich Presence. This local sender remains experimental: Discord can still filter it.",
                 {color:muted,fontSize:12,lineHeight:18}));
         const image=(p,small,size)=>el(VenusRpcCover,{
             key:(small?"small:":"cover:")+(venusRpcPreviewImage(p,small)||"none"),
@@ -536,7 +537,7 @@
                     "Try selected game with its name + cover",()=>{
                     edit(p=>venusRpcNormalize(Object.assign({},p,{sendMode:"compat"})));
                     setTab("send");
-                    setNotice("Alternative name + cover selected. Publish to test; Discord may still hide the activity.");
+                    setNotice("Name + cover selected. Configure one registered shared Application ID in Send, then publish. Discord may still hide local dispatches.");
                 },profile.sendMode==="compat","selectedGameCover"):null,
             !gamesToShow.length?text("No matching games.",{color:muted,fontSize:12}):null,
             matches.length>visible?button("Show more games",()=>
@@ -651,7 +652,7 @@
             text("Activity timer",{fontSize:16,fontWeight:"700"}),elapsedPicker,
             text("Artwork",{fontSize:16,fontWeight:"700"}),
             field("Profile cover URL (preview only)","iconUrl","https://example.com/cover.png",512),
-            text("Full Rich Presence supports registered asset IDs or public HTTPS images. Name + cover mode uses HTTPS images only, choosing the selected game's official icon when no cover URL is supplied.",
+            text("Full Rich Presence supports registered asset IDs or public HTTPS images. Name + cover uses a shared registered application with the selected game's official HTTPS artwork, if available.",
                 {fontSize:12,color:muted,lineHeight:18}),
             field("Large artwork URL or asset ID","largeImage","https://example.com/art.png",256),
             field("Large image description","largeText","Cover art"),
@@ -695,8 +696,23 @@
             deliveryPicker,
             gatewayPanel,
             text("Discord application",{fontSize:16,fontWeight:"700"}),
-            field("Application ID","applicationId","Enter the game's registered ID",20),
-            text("Some official game IDs do not produce visible activities. Name + cover sends a game image and name without its game ID, but Discord may still filter the result.",
+            field("Game Application ID","applicationId","Official library game ID",20),
+            text("Shared publisher Application ID (one for every game)",
+                {fontSize:13,fontWeight:"700"}),
+            el(RN.TextInput,{
+                accessibilityLabel:"Shared publisher Application ID",
+                value:String(settings.rpcPublisherApplicationId||""),
+                placeholder:"ID of an app you registered on Discord",
+                placeholderTextColor:muted,keyboardType:"number-pad",
+                maxLength:20,autoCorrect:false,
+                onChangeText:v=>setSetting("rpcPublisherApplicationId",
+                    String(v||"").replace(/\D/g,"").slice(0,20)),
+                style:{color:fg,backgroundColor:"#171a21",borderWidth:1,
+                    borderColor:line,borderRadius:10,padding:12}
+            }),
+            text("Required only for Name + cover. Create or use a registered Discord application you control. One ID works across all library selections. Never enter an account token here.",
+                {fontSize:12,color:muted,lineHeight:18}),
+            text("Local activity dispatch is experimental and does not confirm that other Discord users can see it. Official Android Rich Presence uses the Discord Social SDK 1.10+.",
                 {fontSize:12,color:muted,lineHeight:18}),
             el(RN.View,{style:{flexDirection:"row",alignItems:"center",justifyContent:"space-between"}},
                 text("Sync edits automatically",{fontSize:13,fontWeight:"600"}),
@@ -725,7 +741,7 @@
                 setSetting("rpcProfiles",JSON.stringify(profiles.slice(0,32)));
                 setSetting("rpcSelected",p.id);
                 setSetting("rpcEnabled",true);
-                setNotice("Name + cover activity dispatched. Check visibility from another account.");
+                setNotice("Shared-app activity dispatched locally. Visibility is unverified; test from another account.");
             },false,"compatPublish"));
         const updateDetectedProfile=on=>{
             const p=venusRpcNormalize(Object.assign({},profile,{autoDetect:on}));
