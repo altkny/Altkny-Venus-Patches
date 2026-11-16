@@ -6154,6 +6154,17 @@
         const known=venusRpcGameForProfile(p);
         return known?known.id:null;
     }
+    // Reuse Compatibility as an alternate sender, with no game-specific ID.
+    function venusRpcGameCover(profile) {
+        const p=profile||{};
+        if(venusRpcValidUrl(p.largeImage)) return p.largeImage;
+        if(venusRpcValidUrl(p.iconUrl)) return p.iconUrl;
+        // Only catalog games inherit official artwork, never generic apps.
+        if(p.category!=="Game") return "";
+        const known=venusRpcGameForProfile(p);
+        const id=String(p.applicationId||(known&&known.id)||"");
+        return venusRpcOfficialIcon(id,p.iconHash||(known&&known.icon),512);
+    }
     function venusRpcWarmApplication(id) {
         // Badge Completer uses the same application metadata fetch. It helps
         // the native Discord activity store resolve games from its directory.
@@ -6195,12 +6206,20 @@
         // Discord may drop unsupported CDN/remote asset keys; the preview is
         // intentionally independent and never claims that assets were accepted.
         const assets={};
-        if(p.largeImage) assets.large_image=p.largeImage;
-        if(p.smallImage) assets.small_image=p.smallImage;
+        if(mode==="compat") {
+            // HTTPS artwork does not reference the selected game's ID.
+            // Discord may still discard the assets or filter the activity.
+            const cover=venusRpcGameCover(p);
+            if(cover) assets.large_image=cover;
+            if(venusRpcValidUrl(p.smallImage)) assets.small_image=p.smallImage;
+        } else {
+            if(p.largeImage) assets.large_image=p.largeImage;
+            if(p.smallImage) assets.small_image=p.smallImage;
+        }
         if(p.largeText) assets.large_text=p.largeText;
+        else if(mode==="compat"&&assets.large_image) assets.large_text=p.name;
         if(p.smallText) assets.small_text=p.smallText;
-        if(Object.keys(assets).length&&(mode==="rich"||mode==="kizzy"))
-            activity.assets=assets;
+        if(Object.keys(assets).length) activity.assets=assets;
         if(buttons.length) {
             activity.buttons=buttons.map(b=>b.label);
             activity.metadata={button_urls:buttons.map(b=>b.url)};
@@ -7147,7 +7166,7 @@
             button("Full Rich Presence · Application ID",()=>
                 edit(p=>Object.assign({},p,{sendMode:"rich"})),
                 profile.sendMode==="rich","rich"),
-            button("Compatibility · Local-only experimental",()=>{
+            button("Name + cover · No game ID (experimental)",()=>{
                 if(venusRpcNeedsGateway(profile)){
                     setNotice("Third-party app templates without an Application ID cannot use local Compatibility to publish. Use the Gateway connection.");
                     setTab("send");
@@ -7159,7 +7178,7 @@
             button("Kizzy Gateway · Independent WebSocket",()=>
                 edit(p=>Object.assign({},p,{sendMode:"kizzy"})),
                 profile.sendMode==="kizzy","kizzy"),
-            text("Full and Compatibility only use the client dispatcher. This has not been verified as public activity. App templates require Gateway publication until an official Android Rich Presence transport is integrated.",
+            text("Name + cover keeps the selected game's name and HTTPS artwork but omits its Application ID when sending. Both local modes are experimental and can be filtered by Discord; delivery never proves public visibility. App templates without an ID still require Gateway.",
                 {color:muted,fontSize:12,lineHeight:18}));
         const image=(p,small,size)=>el(VenusRpcCover,{
             key:(small?"small:":"cover:")+(venusRpcPreviewImage(p,small)||"none"),
@@ -7174,7 +7193,7 @@
             el(RN.View,{style:{flexDirection:"row",justifyContent:"space-between",alignItems:"center"}},
                 text((VENUS_RPC_TYPES.find(row=>row[0]===profile.type)||VENUS_RPC_TYPES[0])[1].toUpperCase()+
                     " · "+(profile.sendMode==="kizzy"?"KIZZY GATEWAY":
-                        profile.sendMode==="compat"?"COMPATIBILITY":"RICH PRESENCE"),
+                        profile.sendMode==="compat"?"NAME + COVER":"RICH PRESENCE"),
                     {fontSize:10,color:muted,fontWeight:"700",letterSpacing:0.5}),
                 text("LIVE PREVIEW",{fontSize:10,color:"#a8b0ff",fontWeight:"700"})),
             el(RN.View,{style:{flexDirection:"row",gap:12,alignItems:"center"}},
@@ -7283,6 +7302,13 @@
             venusRpcCatalog.error?text(venusRpcCatalog.error,
                 {fontSize:11,color:"#e6bb8d"}):null,
             ...gamesToShow.map(g=>tile(g,false,false)),
+            profile.category==="Game"?
+                button(profile.sendMode==="compat"?"Name + cover mode selected":
+                    "Try selected game with its name + cover",()=>{
+                    edit(p=>venusRpcNormalize(Object.assign({},p,{sendMode:"compat"})));
+                    setTab("send");
+                    setNotice("Alternative name + cover selected. Publish to test; Discord may still hide the activity.");
+                },profile.sendMode==="compat","selectedGameCover"):null,
             !gamesToShow.length?text("No matching games.",{color:muted,fontSize:12}):null,
             matches.length>visible?button("Show more games",()=>
                 setVisible(n=>Math.min(n+40,500)),false,"moreGames"):null,
@@ -7396,7 +7422,7 @@
             text("Activity timer",{fontSize:16,fontWeight:"700"}),elapsedPicker,
             text("Artwork",{fontSize:16,fontWeight:"700"}),
             field("Profile cover URL (preview only)","iconUrl","https://example.com/cover.png",512),
-            text("Discord displays the application's registered icon by default. Use registered asset IDs or publicly accessible HTTPS images below to set custom artwork.",
+            text("Full Rich Presence supports registered asset IDs or public HTTPS images. Name + cover mode uses HTTPS images only, choosing the selected game's official icon when no cover URL is supplied.",
                 {fontSize:12,color:muted,lineHeight:18}),
             field("Large artwork URL or asset ID","largeImage","https://example.com/art.png",256),
             field("Large image description","largeText","Cover art"),
@@ -7441,7 +7467,7 @@
             gatewayPanel,
             text("Discord application",{fontSize:16,fontWeight:"700"}),
             field("Application ID","applicationId","Enter the game's registered ID",20),
-            text("A game in the searchable directory is not necessarily publishable as Rich Presence. Discord may filter unsupported applications.",
+            text("Some official game IDs do not produce visible activities. Name + cover sends a game image and name without its game ID, but Discord may still filter the result.",
                 {fontSize:12,color:muted,lineHeight:18}),
             el(RN.View,{style:{flexDirection:"row",alignItems:"center",justifyContent:"space-between"}},
                 text("Sync edits automatically",{fontSize:13,fontWeight:"600"}),
@@ -7459,7 +7485,7 @@
                     "Gateway submitted (not verified from a second account)":
                     "Local dispatch only (remote visibility unverified)")),
                 {fontSize:12,color:venusRpcTransport.error?"#ffbcab":muted}),
-            button("Switch to compatibility and publish",()=>{
+            button("Publish using name + cover instead",()=>{
                 const p=venusRpcNormalize(Object.assign({},profile,{sendMode:"compat"}));
                 edit(p);
                 const resume=rpcRunning&&venusRpcTransport.profileId===p.id;
@@ -7470,7 +7496,7 @@
                 setSetting("rpcProfiles",JSON.stringify(profiles.slice(0,32)));
                 setSetting("rpcSelected",p.id);
                 setSetting("rpcEnabled",true);
-                setNotice("Compatibility presence sent. Check its visibility on another client.");
+                setNotice("Name + cover activity dispatched. Check visibility from another account.");
             },false,"compatPublish"));
         const updateDetectedProfile=on=>{
             const p=venusRpcNormalize(Object.assign({},profile,{autoDetect:on}));
