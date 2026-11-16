@@ -99,6 +99,17 @@
         const known=venusRpcGameForProfile(p);
         return known?known.id:null;
     }
+    // Reuse Compatibility as an alternate sender, with no game-specific ID.
+    function venusRpcGameCover(profile) {
+        const p=profile||{};
+        if(venusRpcValidUrl(p.largeImage)) return p.largeImage;
+        if(venusRpcValidUrl(p.iconUrl)) return p.iconUrl;
+        // Only catalog games inherit official artwork, never generic apps.
+        if(p.category!=="Game") return "";
+        const known=venusRpcGameForProfile(p);
+        const id=String(p.applicationId||(known&&known.id)||"");
+        return venusRpcOfficialIcon(id,p.iconHash||(known&&known.icon),512);
+    }
     function venusRpcWarmApplication(id) {
         // Badge Completer uses the same application metadata fetch. It helps
         // the native Discord activity store resolve games from its directory.
@@ -140,12 +151,20 @@
         // Discord may drop unsupported CDN/remote asset keys; the preview is
         // intentionally independent and never claims that assets were accepted.
         const assets={};
-        if(p.largeImage) assets.large_image=p.largeImage;
-        if(p.smallImage) assets.small_image=p.smallImage;
+        if(mode==="compat") {
+            // HTTPS artwork does not reference the selected game's ID.
+            // Discord may still discard the assets or filter the activity.
+            const cover=venusRpcGameCover(p);
+            if(cover) assets.large_image=cover;
+            if(venusRpcValidUrl(p.smallImage)) assets.small_image=p.smallImage;
+        } else {
+            if(p.largeImage) assets.large_image=p.largeImage;
+            if(p.smallImage) assets.small_image=p.smallImage;
+        }
         if(p.largeText) assets.large_text=p.largeText;
+        else if(mode==="compat"&&assets.large_image) assets.large_text=p.name;
         if(p.smallText) assets.small_text=p.smallText;
-        if(Object.keys(assets).length&&(mode==="rich"||mode==="kizzy"))
-            activity.assets=assets;
+        if(Object.keys(assets).length) activity.assets=assets;
         if(buttons.length) {
             activity.buttons=buttons.map(b=>b.label);
             activity.metadata={button_urls:buttons.map(b=>b.url)};
